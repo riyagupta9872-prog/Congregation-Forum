@@ -1,0 +1,67 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: any signed-in user
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    // Helper: check role from users collection
+    function userRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+    function isSuperAdmin() {
+      return isAuth() && userRole() == 'superAdmin';
+    }
+
+    // ── All devotee data — any authenticated user can read/write ──────────
+    match /devotees/{id}       { allow read, write: if isAuth(); }
+    match /sessions/{id}       { allow read, write: if isAuth(); }
+    match /attendanceRecords/{id} { allow read, write: if isAuth(); }
+    match /callingStatus/{id}  { allow read, write: if isAuth(); }
+    match /callingSubmissions/{id} { allow read, write: if isAuth(); }
+    match /events/{id}         { allow read, write: if isAuth(); }
+    match /eventDevotees/{id}  { allow read, write: if isAuth(); }
+    match /profileChanges/{id} { allow read, write: if isAuth(); }
+
+    // ── Activity logs (Books / Service / Registration / Donation) ─────────
+    match /bookDistributions/{id} { allow read, write: if isAuth(); }
+    match /services/{id}          { allow read, write: if isAuth(); }
+    match /registrations/{id}     { allow read, write: if isAuth(); }
+    match /donations/{id}         { allow read, write: if isAuth(); }
+
+    // ── Signup approval queue ─────────────────────────────────────────────
+    // Auth account is created first, so all reads/writes here are authenticated.
+    // SuperAdmin can update/delete to approve or reject requests.
+    match /signupRequests/{id} {
+      allow read, create: if isAuth();
+      allow update, delete: if isSuperAdmin();
+    }
+
+    // ── User profiles — anyone can read their own; superAdmin reads all ───
+    match /users/{uid} {
+      allow read:  if isAuth();
+      allow write: if isAuth() && (request.auth.uid == uid || isSuperAdmin());
+    }
+
+    // ── App-wide settings (calling week config, etc.) ─────────────────────
+    // Anyone authenticated can read; only superAdmin can write
+    match /settings/{docId} {
+      allow read:  if isAuth();
+      allow write: if isSuperAdmin();
+    }
+
+    // ── Calling week history (used for fallback when no week configured) ──
+    match /callingWeekHistory/{id} {
+      allow read:  if isAuth();
+      allow write: if isSuperAdmin();
+    }
+
+    // ── Personal Meetings log (super admin only) ──────────────────────────
+    match /personalMeetings/{id} {
+      allow read, write: if isSuperAdmin();
+    }
+
+  }
+}

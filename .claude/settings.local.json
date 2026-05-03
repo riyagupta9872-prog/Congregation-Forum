@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh repo *)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(gh api *)",
+      "Read(//c/Users/User/AppData/Local/Temp/sakhi_src/js/**)"
+    ]
+  }
+}
