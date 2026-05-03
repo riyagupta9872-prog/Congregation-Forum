@@ -21,14 +21,14 @@ auth.onAuthStateChanged(async (user) => {
         await fdb.collection('users').doc(user.uid).set(data);
         userDoc = { data: () => data };
       } else {
-        // No users-doc and not the first user → must be approved.
+        // No users-doc yet. Show pending screen AND watch for the doc to appear
+        // (super admin approval creates users/{uid}). The watcher auto-reloads.
         showPendingApprovalScreen();
         return;
       }
     }
     const ud = userDoc.data();
     if (ud.status === 'rejected') {
-      // Their sign-up was explicitly rejected — block sign-in.
       await auth.signOut();
       showAuthScreen();
       const errEl = document.getElementById('login-error');
@@ -38,7 +38,11 @@ auth.onAuthStateChanged(async (user) => {
       }
       return;
     }
-    AppState.userRole      = ud.role;
+    // Guard: if the users doc exists but has no role (e.g. manually created in
+    // Firebase Console without a role field), default to serviceDevotee so the
+    // app still opens rather than crashing or looping.
+    const validRoles = ['superAdmin', 'teamAdmin', 'serviceDevotee'];
+    AppState.userRole      = validRoles.includes(ud.role) ? ud.role : 'serviceDevotee';
     AppState.userTeam      = ud.teamName   || null;
     AppState.userPosition  = ud.position   || null;
     AppState.userName      = ud.name       || user.email;
@@ -87,18 +91,35 @@ let _pendingApprovalUnsub = null;
 function showPendingApprovalScreen() {
   document.getElementById('pending-approval-screen')?.classList.remove('hidden');
   document.getElementById('auth-screen').classList.add('hidden');
-  // Watch users/{uid} in real-time — fires the moment super admin approves,
-  // so the user doesn't have to manually refresh to get in.
   const uid = auth.currentUser?.uid;
-  if (uid && !_pendingApprovalUnsub) {
+  if (!uid) return;
+  // Real-time watcher: reloads the moment super admin creates users/{uid}.
+  if (!_pendingApprovalUnsub) {
     _pendingApprovalUnsub = fdb.collection('users').doc(uid).onSnapshot(doc => {
       if (doc.exists && doc.data()?.status !== 'rejected') {
-        _pendingApprovalUnsub?.();
-        _pendingApprovalUnsub = null;
+        _pendingApprovalUnsub?.(); _pendingApprovalUnsub = null;
         window.location.reload();
       }
-    }, () => {});
+    }, () => {
+      // Real-time listener failed (e.g. rules not published).
+      // Fall back to a 10-second poll so approval still works.
+      _startApprovalPoller(uid);
+    });
   }
+}
+
+let _approvalPoller = null;
+function _startApprovalPoller(uid) {
+  if (_approvalPoller) return;
+  _approvalPoller = setInterval(async () => {
+    try {
+      const doc = await fdb.collection('users').doc(uid).get();
+      if (doc.exists && doc.data()?.status !== 'rejected') {
+        clearInterval(_approvalPoller); _approvalPoller = null;
+        window.location.reload();
+      }
+    } catch (_) {}
+  }, 10000);
 }
 function hidePendingApprovalScreen() {
   document.getElementById('pending-approval-screen')?.classList.add('hidden');
@@ -199,16 +220,24 @@ async function doSignup(e) {
       _resetBtn(); return;  // onAuthStateChanged will pick them up as super admin
     }
     // Record the request — they'll see the "Awaiting approval" gate.
-    await fdb.collection('signupRequests').doc(cred.user.uid).set({
-      uid:           cred.user.uid,
-      email, name,
-      requestedRole: role,
-      requestedTeam: team || null,
-      status:        'pending',
-      createdAt:     TS(),
-    });
+    // Show the pending screen first so the user is never stuck even if the
+    // Firestore write fails (e.g. rules not yet published).
     showPendingApprovalScreen();
     _resetBtn();
+    try {
+      await fdb.collection('signupRequests').doc(cred.user.uid).set({
+        uid:           cred.user.uid,
+        email, name,
+        requestedRole: role,
+        requestedTeam: team || null,
+        status:        'pending',
+        createdAt:     TS(),
+      });
+    } catch (writeErr) {
+      // The account was created but the request doc couldn't be saved.
+      // Super admin can still manually approve via Firebase Console.
+      console.error('signupRequests write failed:', writeErr.message);
+    }
   } catch (ex) {
     err.textContent = ex.code === 'auth/email-already-in-use' ? 'Email already registered' : ex.message;
     err.classList.add('show');
@@ -266,11 +295,32 @@ function subscribePendingSignups() {
       .onSnapshot(snap => {
         _signupReqCache = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         _updateSignupBadges(_signupReqCache.length);
-        // If the modal is open, refresh its content
         const open = !document.getElementById('signup-requests-modal')?.classList.contains('hidden');
         if (open) renderSignupRequests();
-      }, err => { console.error('signupRequests subscription', err); });
+      }, err => {
+        console.error('signupRequests subscription', err);
+        // Listener failed (rules not published or index missing).
+        // Fall back to a one-time query so the modal still works.
+        _signupReqUnsub = null;
+        _fetchSignupRequestsOnce();
+      });
   } catch (e) { console.error('subscribePendingSignups', e); }
+}
+
+async function _fetchSignupRequestsOnce() {
+  try {
+    // Fetch ALL signupRequests and filter client-side to avoid needing a Firestore index.
+    const snap = await fdb.collection('signupRequests').get();
+    _signupReqCache = snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(r => r.status === 'pending');
+    _updateSignupBadges(_signupReqCache.length);
+    const open = !document.getElementById('signup-requests-modal')?.classList.contains('hidden');
+    if (open) renderSignupRequests();
+  } catch (e) {
+    console.error('_fetchSignupRequestsOnce', e);
+    showToast('Could not load sign-up requests. Check Firestore rules.', 'error');
+  }
 }
 
 function _updateSignupBadges(count) {
@@ -289,7 +339,9 @@ function _updateSignupBadges(count) {
 function openSignupRequests() {
   closeSidebar();
   openModal('signup-requests-modal');
-  renderSignupRequests();
+  // Always do a fresh fetch when the modal opens — guards against the
+  // real-time listener having failed silently (e.g. rules not published).
+  _fetchSignupRequestsOnce().then(() => renderSignupRequests());
 }
 
 function renderSignupRequests() {
@@ -341,29 +393,40 @@ function renderSignupRequests() {
 }
 
 async function approveSignupRequest(id) {
-  const r = _signupReqCache.find(x => x.id === id);
-  if (!r) return;
-  const role = document.getElementById('srq-role-' + id)?.value || 'serviceDevotee';
-  const team = document.getElementById('srq-team-' + id)?.value || null;
+  let r = _signupReqCache.find(x => x.id === id);
+  // If cache is empty (listener failed), fetch the doc directly.
+  if (!r) {
+    try {
+      const doc = await fdb.collection('signupRequests').doc(id).get();
+      if (!doc.exists) { showToast('Request not found', 'error'); return; }
+      r = { id: doc.id, ...doc.data() };
+    } catch (e) { showToast('Could not load request: ' + (e.message || 'Error'), 'error'); return; }
+  }
+  // The signupRequest doc ID is the user's Firebase Auth UID.
+  // r.uid is the same value stored explicitly in the doc for clarity.
+  const uid  = r.uid || r.id;
+  const role = document.getElementById('srq-role-' + id)?.value || r.requestedRole || 'serviceDevotee';
+  const team = document.getElementById('srq-team-' + id)?.value || r.requestedTeam || null;
+  if (!uid) { showToast('Cannot approve: missing user ID on request', 'error'); return; }
   try {
-    // Create the users/{uid} doc — this is what onAuthStateChanged looks for.
-    await fdb.collection('users').doc(r.uid).set({
-      email: r.email,
-      name:  r.name,
+    // Create users/{uid} — this is what onAuthStateChanged checks.
+    await fdb.collection('users').doc(uid).set({
+      email:      r.email || '',
+      name:       r.name  || '',
       role,
-      teamName: team || null,
-      createdAt: TS(),
+      teamName:   team || null,
+      createdAt:  TS(),
       approvedBy: AppState.userName,
       approvedAt: TS(),
     });
     await fdb.collection('signupRequests').doc(id).update({
-      status: 'approved',
-      decidedBy: AppState.userName,
-      decidedAt: TS(),
+      status:       'approved',
+      decidedBy:    AppState.userName,
+      decidedAt:    TS(),
       assignedRole: role,
       assignedTeam: team || null,
     });
-    showToast(`Approved ${r.name || r.email}`, 'success');
+    showToast(`Approved ${r.name || r.email}! They can now log in.`, 'success');
   } catch (e) {
     showToast('Approval failed: ' + (e.message || 'Error'), 'error');
   }

@@ -266,7 +266,7 @@ async function exportCallingList() {
     const wsNI = _xlsSheet([niHdrs,...niRows],[{wch:4},{wch:22},{wch:13},{wch:16},{wch:5},{wch:13},{wch:18},{wch:13},{wch:22},{wch:10}]);
     XLSX.utils.book_append_sheet(wb, wsNI, 'Not Interested');
 
-    XLSX.writeFile(wb, `sakhi_sang_fy${fyStartYear}_${today}.xlsx`);
+    XLSX.writeFile(wb, `congregation_forum_fy${fyStartYear}_${today}.xlsx`);
     showToast(`FY ${fyLabel} export complete! ${allFyWeekPairs.length} weeks of data.`, 'success');
   } catch (e) {
     console.error('exportCallingList error', e);
@@ -545,7 +545,7 @@ async function exportDevoteeDatabase() {
     return _buildAndDownloadDevoteeWorkbook({
       devotees: allDevotees,
       includeTeamCol: false,
-      filename: `sakhi_sang_database_${getToday()}.xlsx`,
+      filename: `congregation_forum_database_${getToday()}.xlsx`,
     });
   } catch (e) {
     console.error(e);
@@ -1155,7 +1155,7 @@ function downloadImportTemplate() {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, wsData,  'Devotees');
   XLSX.utils.book_append_sheet(wb, wsInstr, 'Instructions');
-  XLSX.writeFile(wb, 'sakhi_sang_devotee_template.xlsx');
+  XLSX.writeFile(wb, 'congregation_forum_devotee_template.xlsx');
   showToast('Template downloaded!', 'success');
 }
 
