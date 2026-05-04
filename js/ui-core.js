@@ -4,6 +4,9 @@
 const auth = firebase.auth();
 
 auth.onAuthStateChanged(async (user) => {
+  // Always tear down the previous session first — cancels listeners,
+  // wipes AppState, clears DOM — so no data leaks between accounts.
+  _teardownSession();
   if (!user) { showAuthScreen(); return; }
   AppState.userId = user.uid;
   try {
@@ -275,11 +278,76 @@ async function doForgotPassword() {
   }
 }
 
+// ── SESSION TEARDOWN ─────────────────────────────────
+// Called by onAuthStateChanged on EVERY auth change (sign-out OR new sign-in).
+// Cancels all Firestore listeners, resets AppState, busts caches, clears DOM.
+function _teardownSession() {
+  // Cancel all Firestore real-time listeners
+  _signupReqUnsub?.();   _signupReqUnsub = null;
+  _pendingApprovalUnsub?.(); _pendingApprovalUnsub = null;
+  if (_approvalPoller) { clearInterval(_approvalPoller); _approvalPoller = null; }
+
+  // Reset signup request cache
+  _signupReqCache = [];
+  _updateSignupBadges(0);
+
+  // Bust the DevoteeCache so the next user sees fresh data
+  if (typeof DevoteeCache !== 'undefined') DevoteeCache.bust();
+
+  // Reset AppState to blank — prevents old user's data leaking to next login
+  AppState.userRole     = null;
+  AppState.userTeam     = null;
+  AppState.userPosition = null;
+  AppState.userName     = '';
+  AppState.userId       = null;
+  AppState.profilePic   = null;
+  AppState.isAttSevaDev = false;
+  AppState.currentTab   = 'dashboard';
+  AppState.filters      = { sessionId: null, team: '', callingBy: '', period: 'session', periodAnchor: null };
+  AppState._currentSessionId       = null;
+  AppState._currentReportSessionId = null;
+  AppState.sessionsCache           = {};
+  AppState.callingData             = [];
+  AppState.attendanceCandidates    = {};
+
+  // Clear every tab panel's rendered content so the next user
+  // never briefly sees the previous user's data
+  document.querySelectorAll('.tab-panel').forEach(p => {
+    // Keep the panel's structural HTML (filter bars, sub-tab headers) but
+    // wipe dynamic list containers. Easiest: wipe innerHTML of known containers.
+  });
+  const wipeable = [
+    'devotee-list','dashboard-content','calling-list-wrap','attendance-candidates',
+    'att-accuracy-content','att-sheet-content','yearly-sheet-wrap',
+    'care-content','events-content','calling-mgmt-content',
+    'late-comers-content','newcomers-report-content','serious-analysis-content',
+    'team-leaderboard-content','trends-chart',
+  ];
+  wipeable.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = '';
+  });
+
+  // Reset filter ribbon labels
+  ['fr-session-value','fr-team-value','fr-by-value'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = '';
+  });
+  ['fr-chip-session','fr-chip-team','fr-chip-by'].forEach(id => {
+    document.getElementById(id)?.removeAttribute('data-active');
+  });
+
+  // Close any open modals
+  document.querySelectorAll('.modal-overlay').forEach(m => m.classList.add('hidden'));
+}
+
 async function doLogout() {
   if (!confirm('Log out?')) return;
-  // Clear the "Login as Attendance Service Devotee" mode so a normal next
-  // login goes back to the user's actual role.
   sessionStorage.removeItem('loginAsService');
+  // Teardown immediately so the UI clears before auth.signOut() resolves —
+  // without this there is a visible gap where old data stays on screen.
+  _teardownSession();
+  showAuthScreen();
   await auth.signOut();
 }
 
@@ -894,9 +962,16 @@ function applyRoleUI() {
     : (team ? `${team} - ${pos || 'Facilitator'}` : (pos || 'Facilitator'));
   pill.style.background = role === 'superAdmin' ? '#fde68a' : role === 'teamAdmin' ? '#fef9c3' : '#fffbeb';
 
+  // Show OR hide admin-only buttons — always set both states so switching
+  // accounts never leaves super-admin controls visible to a coordinator.
+  const adminGear = document.getElementById('admin-gear-btn');
+  const clearBtn  = document.getElementById('clear-data-btn');
   if (role === 'superAdmin') {
-    document.getElementById('admin-gear-btn')?.classList.remove('hidden');
-    document.getElementById('clear-data-btn')?.classList.remove('hidden');
+    adminGear?.classList.remove('hidden');
+    clearBtn?.classList.remove('hidden');
+  } else {
+    adminGear?.classList.add('hidden');
+    clearBtn?.classList.add('hidden');
   }
   document.querySelectorAll('.super-admin-only').forEach(el => {
     el.style.display = role === 'superAdmin' ? '' : 'none';
