@@ -58,6 +58,11 @@ service cloud.firestore {
       allow write: if isSuperAdmin();
     }
 
+    // ── Calling resubmit history (subcollection of callingSubmissions) ───
+    match /callingSubmissions/{id}/resubmitHistory/{hid} {
+      allow read, write: if isAuth();
+    }
+
     // ── Personal Meetings log (super admin only) ──────────────────────────
     match /personalMeetings/{id} {
       allow read, write: if isSuperAdmin();

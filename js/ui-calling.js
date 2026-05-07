@@ -1,4 +1,4 @@
-/* ══ UI-CALLING.JS – Calling status tab, reports, late tracking ══ */
+﻿/* ══ UI-CALLING.JS – Calling status tab, reports, late tracking ══ */
 
 let _callingActiveTab = 'list';
 let _callingLocked = false;
@@ -204,16 +204,19 @@ async function loadCallingStatus() {
 
     window._beforeCallingDate = beforeCallingDate;
 
-    const [devotees, mySubmission] = await Promise.all([
+    const [devotees, mySubmission, submSnap] = await Promise.all([
       DB.getCallingStatus(week),
-      _callingLocked ? Promise.resolve(null) : DB.getMyCallingSubmission(week, AppState.userId).catch(() => null)
+      _callingLocked ? Promise.resolve(null) : DB.getMyCallingSubmission(week, AppState.userId).catch(() => null),
+      fdb.collection('callingSubmissions').where('weekDate', '==', week).get().catch(() => null),
     ]);
     AppState.callingData = devotees;
 
-    // Team / Calling By dropdowns moved to the master filter bar — nothing to
-    // populate locally on this tab any more.
+    // Build set of callers who have submitted — used to compute effective "Not Called"
+    const submittedCallerNames = new Set(
+      (submSnap?.docs || []).map(d => d.data().userName).filter(Boolean)
+    );
 
-    renderCallingStats(devotees);
+    renderCallingStats(devotees, submittedCallerNames);
     if (AppState.userRole === 'superAdmin') {
       const bar = document.getElementById('calling-submit-bar');
       if (bar) bar.innerHTML = '';
@@ -335,18 +338,27 @@ function _renderCallingSubmitBar(week, existing) {
       : null;
     bar.style.background  = isLate ? '#fff3e0' : '#e8f5e9';
     bar.style.borderColor = isLate ? '#ffb74d' : 'var(--secondary)';
+    const resubCount = existing.resubmitCount || 0;
+    const histBtn = resubCount > 0
+      ? `<button class="btn btn-secondary" style="padding:.35rem .75rem;font-size:.8rem;flex-shrink:0" onclick="openResubmitHistory('${week}')">
+           <i class="fas fa-history"></i> History (${resubCount})
+         </button>`
+      : '';
     bar.innerHTML = `
       <div style="display:flex;flex-direction:column;gap:.2rem;flex:1">
         <span style="font-size:.9rem;font-weight:700;color:${isLate ? '#bf360c' : 'var(--success)'}">
           <i class="fas fa-${isLate ? 'clock' : 'check-circle'}"></i>
           Calling Status of <strong>${weekLabel}</strong> was submitted at <strong>${initTime}</strong>${isLate ? ' — Late' : ' ✓'}
         </span>
-        ${latest ? `<span style="font-size:.75rem;color:var(--text-muted)"><i class="fas fa-redo"></i> Last update: ${latest}</span>` : ''}
+        ${latest ? `<span style="font-size:.75rem;color:var(--text-muted)"><i class="fas fa-redo"></i> Last update: ${latest}${resubCount > 0 ? ` &nbsp;·&nbsp; ${resubCount} resubmit${resubCount > 1 ? 's' : ''}` : ''}</span>` : ''}
         <span style="font-size:.75rem;color:var(--text-muted)"><i class="fas fa-pencil-alt"></i> You can still edit and re-submit for corrections. Original timestamp is locked.</span>
       </div>
-      <button class="btn btn-primary" style="padding:.35rem 1rem;font-size:.85rem;flex-shrink:0" onclick="doSubmitCallingWeek('${week}')">
-        <i class="fas fa-paper-plane"></i> Re-submit
-      </button>`;
+      <div style="display:flex;gap:.4rem;flex-shrink:0">
+        ${histBtn}
+        <button class="btn btn-primary" style="padding:.35rem 1rem;font-size:.85rem" onclick="doSubmitCallingWeek('${week}')">
+          <i class="fas fa-paper-plane"></i> Re-submit
+        </button>
+      </div>`;
   } else if (week) {
     bar.style.background  = '';
     bar.style.borderColor = '';
@@ -399,15 +411,33 @@ function _reasonNeedsDate(r) {
   return CALLING_REASONS.find(x => x.value === r)?.needsDate || false;
 }
 
-function renderCallingStats(devotees) {
+// submittedCallerNames = Set of caller userNames who submitted this week.
+// Used to compute "effective Not Called" — includes devotees of unsubmitted
+// callers (their entire list counts as not called, per user definition).
+function renderCallingStats(devotees, submittedCallerNames) {
   const yes       = devotees.filter(d => d.coming_status === 'Yes').length;
   const reached   = devotees.filter(d => ['did_not_pick','incoming_na','wrong_number','out_of_service'].includes(d.calling_reason)).length;
   const unavail   = devotees.filter(d => ['out_of_station','exams'].includes(d.calling_reason)).length;
   const online    = devotees.filter(d => d.calling_reason === 'online_class').length;
   const festival  = devotees.filter(d => d.calling_reason === 'festival_calling').length;
   const notInt    = devotees.filter(d => d.calling_reason === 'not_interested_now').length;
-  const uncalled  = devotees.filter(d => !d.coming_status && !d.calling_reason && !d.calling_notes).length;
-  // Each pill is clickable → opens a modal listing the devotees in that bucket.
+
+  // "Not Called" definition (consistent with Calling Mgmt report):
+  // A devotee is "not called" if:
+  //   (a) their status is completely blank, OR
+  //   (b) their caller was assigned but never submitted (their whole list = not called)
+  const blankStatus = d => !d.coming_status && !d.calling_reason && !d.calling_notes;
+
+  let uncalled;
+  if (submittedCallerNames && submittedCallerNames.size >= 0) {
+    uncalled = devotees.filter(d => {
+      if (d.calling_by && !submittedCallerNames.has(d.calling_by)) return true; // unsubmitted caller
+      return blankStatus(d); // blank status from submitted caller or no caller
+    }).length;
+  } else {
+    uncalled = devotees.filter(blankStatus).length;
+  }
+
   document.getElementById('calling-stats').innerHTML = `
     <button class="calling-stat" onclick="openCallingStatList('confirmed')"     title="Click to see who confirmed"><i class="fas fa-check-circle" style="color:var(--success)"></i> <strong>${yes}</strong> Confirmed</button>
     <button class="calling-stat" onclick="openCallingStatList('not_reached')"   title="Click to see who couldn't be reached"><i class="fas fa-phone-slash" style="color:var(--danger)"></i> <strong>${reached}</strong> Not reached</button>
@@ -415,7 +445,7 @@ function renderCallingStats(devotees) {
     <button class="calling-stat" onclick="openCallingStatList('online')"        title="Click to see online class devotees"><i class="fas fa-laptop" style="color:#0288d1"></i> <strong>${online}</strong> Online</button>
     ${festival ? `<button class="calling-stat" onclick="openCallingStatList('festival')" title="Click to see festival calling list"><i class="fas fa-star-and-crescent" style="color:#f57f17"></i> <strong>${festival}</strong> Festival</button>` : ''}
     ${notInt ? `<button class="calling-stat" onclick="openCallingStatList('not_interested')" title="Click to see Not Interested (this week)"><i class="fas fa-ban" style="color:var(--danger)"></i> <strong>${notInt}</strong> Not Interested</button>` : ''}
-    <button class="calling-stat" onclick="openCallingStatList('uncalled')"      title="Click to see who hasn't been called yet"><i class="fas fa-circle-notch" style="color:var(--text-muted)"></i> <strong>${uncalled}</strong> Not called</button>`;
+    <button class="calling-stat" onclick="openCallingStatList('uncalled')"      title="Blank status + unsubmitted callers' devotees"><i class="fas fa-circle-notch" style="color:var(--text-muted)"></i> <strong>${uncalled}</strong> Not called</button>`;
 }
 
 function filterCallingList() {
@@ -1250,6 +1280,196 @@ function _renderCSModal() {
           <td style="font-size:.82rem">${d.calling_by || '—'}</td>
         </tr>`).join('')}</tbody>
     </table></div>`;
+}
+
+// ── CALLING HISTORY TAB ──────────────────────────────
+let _callingHistoryCache = null;
+
+async function loadCallingHistoryTab(force = false) {
+  const wrap = document.getElementById('calling-history-content');
+  if (!wrap) return;
+  if (_callingHistoryCache && !force) { _renderCallingHistory(_callingHistoryCache); return; }
+  wrap.innerHTML = '<div class="loading" style="padding:2rem"><i class="fas fa-spinner"></i> Loading 4-week history…</div>';
+  try {
+    if (typeof DB.getCallingHistoryData !== 'function') {
+      throw new Error('getCallingHistoryData not available — ensure db.js is up to date');
+    }
+    const filters = { team: getFilterTeam(), callingBy: getFilterCallingBy() };
+    const data = await DB.getCallingHistoryData(filters);
+    _callingHistoryCache = data;
+    _renderCallingHistory(data);
+  } catch (e) {
+    console.error('[Calling History] loadCallingHistoryTab:', e);
+    wrap.innerHTML = `<div class="empty-state">
+      <i class="fas fa-exclamation-circle"></i>
+      <p>Failed to load calling history.</p>
+      <p style="font-size:.78rem;color:var(--text-muted);margin-top:.3rem">${e.message || 'Check console for details'}</p>
+      <button class="btn btn-secondary" style="margin-top:.75rem;font-size:.82rem" onclick="loadCallingHistoryTab(true)">
+        <i class="fas fa-sync-alt"></i> Retry
+      </button>
+    </div>`;
+  }
+}
+
+// Re-load history whenever master filters change
+window.addEventListener('filtersChanged', () => {
+  if (AppState._callingSubTab === 'history') {
+    _callingHistoryCache = null;
+    loadCallingHistoryTab();
+  } else {
+    _callingHistoryCache = null; // bust so next open is fresh
+  }
+});
+
+function _renderCallingHistory({ weeks, devotees, statusMap, submissionMap }) {
+  const wrap = document.getElementById('calling-history-content');
+  if (!weeks.length || !devotees.length) {
+    wrap.innerHTML = '<div class="empty-state" style="padding:2rem"><i class="fas fa-history" style="font-size:2rem;opacity:.3"></i><p style="margin-top:.5rem;color:var(--text-muted)">No calling history found for this filter</p></div>';
+    return;
+  }
+
+  // Short date labels for column headers
+  const weekLabels = weeks.map(w =>
+    new Date(w + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+  );
+
+  // Build devoteeId → callerName map so we can look up the caller without
+  // relying on callingStatus.callingBy (that field is not stored in cs docs)
+  const devCallerMap = {};
+  devotees.forEach(d => { if (d.callingBy) devCallerMap[d.id] = d.callingBy; });
+
+  // Status → short display label + colour
+  const statusDisplay = cs => {
+    if (!cs) return { label: '—', bg: '', color: 'var(--text-muted)', tip: 'Not called' };
+    const s = cs.comingStatus || '';
+    const r = cs.callingReason || '';
+    if (s === 'Yes')   return { label: 'Yes',     bg: '#e8f5e9', color: '#2e7d32',  tip: 'Confirmed coming' };
+    if (r === 'online_class')     return { label: 'Online',  bg: '#e3f2fd', color: '#1565c0', tip: 'Shifted to online' };
+    if (r === 'festival_calling') return { label: 'Festival',bg: '#fff8e1', color: '#f57f17', tip: 'Festival calling' };
+    if (r === 'out_of_station')   return { label: 'OOS',     bg: '#f3e5f5', color: '#7b1fa2', tip: 'Out of station' };
+    if (r === 'did_not_pick')     return { label: 'DND',     bg: '#fff3e0', color: '#e65100', tip: 'Did not pick' };
+    if (s === 'No')    return { label: 'No',      bg: '#fce4ec', color: '#c62828', tip: 'Not coming' };
+    if (s === 'Shift') return { label: 'Online',  bg: '#e3f2fd', color: '#1565c0', tip: 'Online class' };
+    if (s)             return { label: s.slice(0,6), bg: '#f5f5f5', color: '#555', tip: s };
+    return { label: '—', bg: '', color: 'var(--text-muted)', tip: 'No status' };
+  };
+
+  // Check if a status was edited AFTER submission
+  const isPostSubmitEdit = (cs, week) => {
+    if (!cs) return false;
+    const caller = devCallerMap[cs.devoteeId] || '';
+    const submittedAt = submissionMap[week]?.[caller];
+    if (!submittedAt) return false;
+    const updatedAt = cs.updatedAtClient
+      || (cs.updatedAt?.toDate?.()?.toISOString?.())
+      || '';
+    return updatedAt > submittedAt;
+  };
+
+  const rows = devotees.map((dev, idx) => {
+    const cells = weeks.map(w => {
+      const cs  = statusMap[w]?.[dev.id];
+      const { label, bg, color, tip } = statusDisplay(cs);
+      const edited = isPostSubmitEdit(cs, w);
+      const pencil = edited
+        ? `<span title="Edited after submission" style="margin-left:.3rem;color:#e65100;font-size:.7rem"><i class="fas fa-pencil-alt"></i></span>`
+        : '';
+      const bgStyle = bg ? `background:${bg};` : '';
+      return `<td style="text-align:center;padding:.3rem .4rem;${bgStyle}" title="${tip}">
+        <span style="font-size:.78rem;font-weight:600;color:${color}">${label}</span>${pencil}
+      </td>`;
+    }).join('');
+
+    const isEdited = weeks.some(w => isPostSubmitEdit(statusMap[w]?.[dev.id], w));
+    const rowBg    = isEdited ? 'background:#fffde7' : '';
+
+    return `<tr style="${rowBg}">
+      <td style="color:var(--text-muted);font-size:.75rem;text-align:center;padding:.3rem .4rem">${idx + 1}</td>
+      <td style="font-weight:600;font-size:.82rem;padding:.3rem .5rem;white-space:nowrap">${dev.name}</td>
+      <td style="padding:.3rem .4rem">${dev.teamName ? teamBadge(dev.teamName) : '—'}</td>
+      <td style="font-size:.75rem;color:var(--text-muted);padding:.3rem .4rem">${dev.callingBy || '—'}</td>
+      ${cells}
+    </tr>`;
+  }).join('');
+
+  const editedCount = devotees.filter(dev => weeks.some(w => isPostSubmitEdit(statusMap[w]?.[dev.id], w))).length;
+  const legendHtml = `
+    <div style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;font-size:.75rem;color:var(--text-muted);padding:.5rem 0 .75rem">
+      <span style="background:#e8f5e9;color:#2e7d32;padding:.1rem .4rem;border-radius:4px;font-weight:600">Yes</span> Coming &nbsp;
+      <span style="background:#fce4ec;color:#c62828;padding:.1rem .4rem;border-radius:4px;font-weight:600">No</span> Not coming &nbsp;
+      <span style="background:#e3f2fd;color:#1565c0;padding:.1rem .4rem;border-radius:4px;font-weight:600">Online</span> Online class &nbsp;
+      <span style="color:#e65100"><i class="fas fa-pencil-alt"></i></span> Edited after submission &nbsp;
+      ${editedCount > 0 ? `<span style="background:#fffde7;padding:.1rem .4rem;border-radius:4px">🟡 Row</span> = has post-submit edits` : ''}
+    </div>`;
+
+  wrap.innerHTML = `
+    ${legendHtml}
+    <div style="overflow-x:auto">
+      <table class="calling-table" style="min-width:520px;width:100%">
+        <thead>
+          <tr>
+            <th style="width:32px">#</th>
+            <th style="min-width:120px">Name</th>
+            <th style="min-width:80px">Team</th>
+            <th style="min-width:90px">Calling By</th>
+            ${weekLabels.map(l => `<th style="text-align:center;min-width:68px">${l}</th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <p style="font-size:.72rem;color:var(--text-muted);margin-top:.5rem">
+      <i class="fas fa-info-circle"></i> Showing last ${weeks.length} calling week${weeks.length > 1 ? 's' : ''}.
+      ${editedCount > 0 ? `<span style="color:#e65100;font-weight:600"> ${editedCount} devotee${editedCount > 1 ? 's' : ''} have post-submission edits.</span>` : ''}
+    </p>`;
+}
+
+// ── RESUBMIT HISTORY ─────────────────────────────────
+async function openResubmitHistory(weekDate) {
+  openModal('resubmit-history-modal');
+  const content = document.getElementById('resubmit-history-content');
+  content.innerHTML = '<div class="loading" style="padding:2rem"><i class="fas fa-spinner"></i> Loading…</div>';
+  try {
+    const history = await DB.getCallingResubmitHistory(weekDate, AppState.userId);
+    if (!history.length) {
+      content.innerHTML = '<div class="empty-state" style="padding:2rem"><i class="fas fa-history" style="font-size:2rem;opacity:.3"></i><p style="margin-top:.5rem;color:var(--text-muted)">No resubmit history yet</p></div>';
+      return;
+    }
+    const weekLabel = new Date(weekDate + 'T00:00:00').toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' });
+    content.innerHTML = `
+      <p style="font-size:.82rem;color:var(--text-muted);margin-bottom:1rem">
+        <i class="fas fa-calendar-check"></i> Week of <strong>${weekLabel}</strong> — ${history.length} resubmit${history.length > 1 ? 's' : ''}
+      </p>
+      ${history.map((h, i) => {
+        const dt = h.resubmittedAtClient
+          ? new Date(h.resubmittedAtClient).toLocaleString('en-IN', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit', hour12:true })
+          : '—';
+        const changed = h.changedStatuses || [];
+        const changedHtml = changed.length
+          ? `<div style="margin-top:.5rem;display:flex;flex-direction:column;gap:.2rem">
+              ${changed.map(cs => `
+                <div style="font-size:.76rem;padding:.2rem .5rem;background:var(--gray-50);border-radius:4px;display:flex;gap:.5rem;align-items:center">
+                  <span style="font-weight:600;min-width:130px">${cs.name || cs.devoteeId}</span>
+                  <span class="badge" style="font-size:.68rem;background:${cs.comingStatus === 'Yes' ? '#e8f5e9;color:#2e7d32' : cs.comingStatus === 'No' ? '#fce4ec;color:#c62828' : '#f5f5f5;color:#555'}">${cs.comingStatus || '—'}</span>
+                  ${cs.reason ? `<span style="font-size:.7rem;color:var(--text-muted)">${cs.reason}</span>` : ''}
+                </div>`).join('')}
+            </div>`
+          : `<div style="font-size:.75rem;color:var(--text-muted);margin-top:.3rem"><i class="fas fa-info-circle"></i> No tracked changes (first resubmit or statuses unchanged)</div>`;
+        return `
+          <div style="border:1px solid var(--gray-200);border-radius:8px;padding:.75rem 1rem;margin-bottom:.75rem">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div style="font-weight:700;font-size:.9rem"><i class="fas fa-redo" style="color:var(--brand);margin-right:.3rem"></i> Resubmit #${history.length - i}</div>
+              <div style="font-size:.78rem;color:var(--text-muted)">${dt}</div>
+            </div>
+            <div style="font-size:.8rem;color:var(--text-muted);margin-top:.2rem">
+              ${h.changedCount > 0 ? `<span style="color:var(--brand);font-weight:600">${h.changedCount} status${h.changedCount > 1 ? 'es' : ''} changed</span>` : 'No status changes detected'}
+            </div>
+            ${changedHtml}
+          </div>`;
+      }).join('')}`;
+  } catch (e) {
+    content.innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Failed to load history</p></div>';
+  }
 }
 
 // Calling-stat modal is read-only (view + filter only). Bulk actions live

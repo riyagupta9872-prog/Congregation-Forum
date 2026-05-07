@@ -174,6 +174,7 @@ async function openProfileModal(id) {
           <div class="profile-field"><label>Reference By</label><span id="pv-ref-by">${d.reference_by || '—'}</span></div>
           <div class="profile-field"><label>Facilitator</label><span>${d.facilitator || '—'}</span></div>
           <div class="profile-field"><label>Calling By</label><span>${d.calling_by || '—'}</span></div>
+          ${d.remarks ? `<div class="profile-field full"><label>Remarks</label><span style="white-space:pre-wrap">${d.remarks}</span></div>` : ''}
         </div>
       </div>
 
@@ -345,6 +346,7 @@ function clearDevoteeForm() {
   ['f-name','f-mobile','f-mobile-alt','f-address','f-education','f-email','f-profession','f-hobbies','f-family-members','f-family-participants'].forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
   document.getElementById('f-dob').value = '';
   const fDom = document.getElementById('f-dom'); if (fDom) fDom.value = '';
+  const fRem = document.getElementById('f-remarks'); if (fRem) fRem.value = '';
   document.getElementById('f-joining').value = getToday();
   document.getElementById('f-chanting').value = '0';
   // New devotees default to team "Other" and status "New Devotee" — super admin
@@ -382,6 +384,7 @@ async function populateEditForm(id) {
     document.getElementById('f-address').value  = d.address || '';
     document.getElementById('f-dob').value      = d.dob || '';
     const fDomEl = document.getElementById('f-dom'); if (fDomEl) fDomEl.value = d.date_of_marriage || '';
+    const fRemEl = document.getElementById('f-remarks'); if (fRemEl) fRemEl.value = d.remarks || '';
     document.getElementById('f-joining').value  = d.date_of_joining || '';
     document.getElementById('f-chanting').value = d.chanting_rounds || 0;
     document.getElementById('f-team').value     = d.team_name || '';
@@ -441,6 +444,7 @@ function getFormPayload() {
     facilitator:       document.getElementById('f-facilitator').value.trim(),
     reference_by:      document.getElementById('f-reference').value.trim() || document.querySelector('#picker-reference .picker-input')?.value.trim() || '',
     calling_by:        document.getElementById('f-calling-by').value.trim(),
+    remarks:           (document.getElementById('f-remarks')?.value || '').trim(),
     education:            document.getElementById('f-education').value.trim(),
     email:                document.getElementById('f-email').value.trim(),
     profession:           document.getElementById('f-profession').value.trim(),

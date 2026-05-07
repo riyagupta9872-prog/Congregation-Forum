@@ -1458,9 +1458,22 @@ async function loadAttAccuracyReport() {
   el.innerHTML = '<div class="loading"><i class="fas fa-spinner"></i> Loading…</div>';
 
   try {
-    const sessionId = AppState.currentSessionId;
+    // Use the live session ID; fall back to resolving the session by its date
+    // string when currentSessionId hasn't been set yet (e.g. page just loaded).
+    let sessionId = AppState.currentSessionId;
+    if (!sessionId && AppState.filters?.sessionId) {
+      try {
+        const snap = await fdb.collection('sessions')
+          .where('sessionDate', '==', AppState.filters.sessionId).limit(1).get();
+        if (!snap.empty) sessionId = snap.docs[0].id;
+      } catch (_) {}
+    }
     if (!sessionId) {
-      el.innerHTML = '<div class="empty-state"><i class="fas fa-calendar-alt"></i><p>No session selected</p></div>';
+      el.innerHTML = `<div class="empty-state">
+        <i class="fas fa-calendar-alt" style="font-size:2rem;opacity:.4"></i>
+        <p style="margin-top:.5rem">No session selected.<br>
+        <span style="font-size:.82rem;color:var(--text-muted)">Pick a session from the <strong>Session</strong> filter chip above.</span></p>
+      </div>`;
       return;
     }
 

@@ -1975,6 +1975,7 @@ function switchTab(tab, btn) {
 const TAB_VIEWS = {
   calling: [
     { key: 'calls',      label: 'Calls',              icon: 'fa-phone-alt' },
+    { key: 'history',    label: 'Calling History',    icon: 'fa-history' },
     { divider: true, label: 'REPORTS' },
     { key: 'weekly',     label: 'Weekly Report',      icon: 'fa-chart-bar' },
     { key: 'submission', label: 'Submission Reports', icon: 'fa-chart-line' },
@@ -1988,6 +1989,7 @@ const TAB_VIEWS = {
     { key: 'serious',   label: 'Serious Analysis', icon: 'fa-star' },
     { key: 'teams',     label: 'Team Leaderboard', icon: 'fa-trophy' },
     { key: 'trends',    label: 'Trends',           icon: 'fa-chart-line' },
+    { key: 'accuracy',  label: 'Accuracy',         icon: 'fa-bullseye' },
   ],
   books:        [{ key:'log', label:'Log Entry', icon:'fa-pen' }, { key:'reports', label:'Reports', icon:'fa-chart-bar' }],
   service:      [{ key:'log', label:'Log Entry', icon:'fa-pen' }, { key:'reports', label:'Reports', icon:'fa-chart-bar' }],
@@ -2204,8 +2206,11 @@ async function applyTabView(tab, view) {
     if (view === 'calls') {
       const callsBtn = document.querySelector('#tab-calling .att-sub-tab:nth-child(1)');
       if (callsBtn) switchCallingSubTab(callsBtn, 'calls');
+    } else if (view === 'history') {
+      const histBtn = document.querySelector('#tab-calling .att-sub-tab:nth-child(2)');
+      if (histBtn) switchCallingSubTab(histBtn, 'history');
     } else {
-      const reportsBtn = document.querySelector('#tab-calling .att-sub-tab:nth-child(2)');
+      const reportsBtn = document.querySelector('#tab-calling .att-sub-tab:nth-child(3)');
       if (reportsBtn) switchCallingSubTab(reportsBtn, 'reports');
       const innerSel = view === 'weekly' ? '#calling-panel-reports .sub-tab:nth-child(1)'
                                           : '#calling-panel-reports .sub-tab:nth-child(2)';
@@ -2228,13 +2233,16 @@ async function applyTabView(tab, view) {
         serious:    'serious-analysis',
         teams:      'team-leaderboard',
         trends:     'trends',
+        accuracy:   'att-accuracy',
       })[view];
       if (subId) {
-        const innerBtn = document.querySelector(`#att-panel-reports .sub-tab[onclick*="'${subId}'"]`);
+        const innerBtn = document.querySelector(`#att-panel-reports .sub-tab[onclick*="'${subId}'"]`)
+                      || document.querySelector(`#att-panel-reports .sub-tab[onclick*="${subId}"]`);
         if (innerBtn) switchSubTab(innerBtn, subId);
-        if (subId === 'attendance-detail' && typeof loadYearlySheet === 'function') loadYearlySheet();
-        if (subId === 'late-comers'       && typeof loadLateComersReport === 'function') loadLateComersReport();
+        if (subId === 'attendance-detail'  && typeof loadYearlySheet === 'function')       loadYearlySheet();
+        if (subId === 'late-comers'        && typeof loadLateComersReport === 'function')   loadLateComersReport();
         if (subId === 'individual-reports' && typeof _loadIndividualReports === 'function') _loadIndividualReports();
+        if (subId === 'att-accuracy'       && typeof loadAttAccuracyReport === 'function')  loadAttAccuracyReport();
       }
     }
   } else if (['books','service','registration','donation'].includes(tab)) {
@@ -2332,11 +2340,14 @@ function switchCallingSubTab(btn, sub) {
   const tabs = btn?.parentElement;
   if (tabs) tabs.querySelectorAll('.att-sub-tab').forEach(b => b.classList.remove('active'));
   btn?.classList.add('active');
-  document.getElementById('calling-panel-list').classList.toggle('active',    sub === 'calls');
-  document.getElementById('calling-panel-reports').classList.toggle('active', sub === 'reports');
+  document.getElementById('calling-panel-list')   ?.classList.toggle('active', sub === 'calls');
+  document.getElementById('calling-panel-reports') ?.classList.toggle('active', sub === 'reports');
+  document.getElementById('calling-panel-history') ?.classList.toggle('active', sub === 'history');
   AppState._callingSubTab = sub;
   if (sub === 'calls') {
     loadCallingStatus?.();
+  } else if (sub === 'history') {
+    loadCallingHistoryTab?.();
   } else {
     _reportsCategory = 'calling';
     if (typeof _populateReportWeeks === 'function') _populateReportWeeks().then(() => loadCallingReports?.());

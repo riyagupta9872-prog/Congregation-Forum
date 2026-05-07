@@ -149,6 +149,17 @@
   </div>
 </div>
 
+<!-- ══════════ RESUBMIT HISTORY MODAL ══════════ -->
+<div id="resubmit-history-modal" class="modal-overlay hidden">
+  <div class="modal-box" style="max-width:560px">
+    <div class="modal-header">
+      <h2><i class="fas fa-history"></i> Calling Resubmit History</h2>
+      <button class="btn-icon close" onclick="closeModal('resubmit-history-modal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div id="resubmit-history-content" style="max-height:65vh;overflow-y:auto;padding:.5rem 1rem 1rem"></div>
+  </div>
+</div>
+
 <!-- ══════════ TOAST ══════════ -->
 <div id="toast" class="toast hidden"></div>
 
@@ -437,42 +448,42 @@
 
     <!-- KPI tiles row -->
     <div class="dash-kpi-row" id="dash-kpi-row">
-      <div class="dash-kpi" data-kpi="attended">
+      <div class="dash-kpi" data-kpi="attended" onclick="navTabView('attendance','reports')" title="View attendance report" style="cursor:pointer">
         <div class="dash-kpi-icon att-icon"><i class="fas fa-check-circle"></i></div>
         <div class="dash-kpi-body">
           <div class="dash-kpi-num" id="kpi-attended">—</div>
           <div class="dash-kpi-label">Attended</div>
         </div>
       </div>
-      <div class="dash-kpi" data-kpi="accuracy">
+      <div class="dash-kpi" data-kpi="accuracy" onclick="navTabView('calling','calls')" title="View calling status" style="cursor:pointer">
         <div class="dash-kpi-icon call-icon"><i class="fas fa-phone-alt"></i></div>
         <div class="dash-kpi-body">
           <div class="dash-kpi-num" id="kpi-accuracy">—</div>
           <div class="dash-kpi-label">Calling Accuracy</div>
         </div>
       </div>
-      <div class="dash-kpi" data-kpi="books">
+      <div class="dash-kpi" data-kpi="books" onclick="navToActivityReports('books')" title="View books report" style="cursor:pointer">
         <div class="dash-kpi-icon book-icon"><i class="fas fa-book-open"></i></div>
         <div class="dash-kpi-body">
           <div class="dash-kpi-num" id="kpi-books">—</div>
           <div class="dash-kpi-label">Books</div>
         </div>
       </div>
-      <div class="dash-kpi" data-kpi="service">
+      <div class="dash-kpi" data-kpi="service" onclick="navToActivityReports('service')" title="View service report" style="cursor:pointer">
         <div class="dash-kpi-icon service-icon"><i class="fas fa-hands-helping"></i></div>
         <div class="dash-kpi-body">
           <div class="dash-kpi-num" id="kpi-service">—</div>
           <div class="dash-kpi-label">Services</div>
         </div>
       </div>
-      <div class="dash-kpi" data-kpi="reg">
+      <div class="dash-kpi" data-kpi="reg" onclick="navToActivityReports('registration')" title="View registration report" style="cursor:pointer">
         <div class="dash-kpi-icon reg-icon"><i class="fas fa-id-card-alt"></i></div>
         <div class="dash-kpi-body">
           <div class="dash-kpi-num" id="kpi-reg">—</div>
           <div class="dash-kpi-label">Registrations</div>
         </div>
       </div>
-      <div class="dash-kpi" data-kpi="donation">
+      <div class="dash-kpi" data-kpi="donation" onclick="navToActivityReports('donation')" title="View donation report" style="cursor:pointer">
         <div class="dash-kpi-icon donation-icon"><i class="fas fa-hand-holding-heart"></i></div>
         <div class="dash-kpi-body">
           <div class="dash-kpi-num" id="kpi-donation">—</div>
@@ -561,6 +572,9 @@
       <button class="att-sub-tab" onclick="switchCallingSubTab(this,'reports')">
         <i class="fas fa-chart-bar"></i> Reports
       </button>
+      <button class="att-sub-tab" onclick="switchCallingSubTab(this,'history')">
+        <i class="fas fa-history"></i> History
+      </button>
     </div>
 
     <!-- ── CALLING LIST PANEL ── -->
@@ -599,6 +613,21 @@
       <div id="calling-stats" class="calling-stats-row"></div>
       <div id="calling-list" class="calling-table-wrap"></div>
       <div id="calling-submit-bar" class="calling-submit-bar"></div>
+    </div>
+
+    <!-- ── HISTORY SUB-PANEL ── -->
+    <div id="calling-panel-history" class="att-sub-panel">
+      <div class="panel-header">
+        <h2><i class="fas fa-history"></i> 4-Week Calling History</h2>
+        <div class="panel-actions">
+          <button class="btn btn-secondary btn-sm" onclick="loadCallingHistoryTab(true)">
+            <i class="fas fa-sync-alt"></i> Refresh
+          </button>
+        </div>
+      </div>
+      <div id="calling-history-content">
+        <div class="empty-state"><i class="fas fa-history"></i><p>Click History tab to load</p></div>
+      </div>
     </div>
 
     <!-- ── REPORTS SUB-PANEL (was the standalone Reports tab → calling category) ── -->
@@ -1202,6 +1231,10 @@
               <div class="picker-dropdown hidden"></div>
             </div>
             <input type="hidden" id="f-calling-by">
+          </div>
+          <div class="form-group full">
+            <label>Remarks <span class="field-hint">(optional internal notes)</span></label>
+            <textarea id="f-remarks" rows="3" placeholder="Any internal notes about this devotee…" style="resize:vertical"></textarea>
           </div>
         </div>
       </div>

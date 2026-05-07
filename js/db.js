@@ -33,6 +33,7 @@ function toSnake(d) {
     facilitator:         d.facilitator || null,
     reference_by:        d.referenceBy || null,
     calling_by:          d.callingBy || null,
+    remarks:             d.remarks || null,
     lifetime_attendance: d.lifetimeAttendance || 0,
     is_active:           d.isActive !== false ? 1 : 0,
     inactivity_flag:     d.inactivityFlag ? 1 : 0,
@@ -79,6 +80,7 @@ function toCamel(f) {
     facilitator:       (f.facilitator || '').trim() || null,
     referenceBy:       (f.reference_by || '').trim() || null,
     callingBy:         (f.calling_by || '').trim() || null,
+    remarks:           (f.remarks || '').trim() || null,
     education:         (f.education || '').trim() || null,
     email:             (f.email || '').trim() || null,
     profession:        (f.profession || '').trim() || null,
@@ -221,6 +223,7 @@ const DB = {
             facilitator:      importCol(row, ['Facilitator','facilitator','Faciltr']) || null,
             referenceBy:      importCol(row, ['Reference','Ref','Reference By','Referred By','Ref-2','ref','Ref 2','reference']) || null,
             callingBy:        importCol(row, ['Calling By','Called By','Caller','Calling by','calling by','CallingBy']) || null,
+            remarks:          importCol(row, ['Remarks','remarks','Notes','notes','Comment','comment']) || null,
             education:        importCol(row, ['Education','education','EDUCATION']) || null,
             email:            importCol(row, ['Email','E-Mail','email','E Mail','e-mail','EMAIL']) || null,
             profession:       importCol(row, ['Profession','Occupation','profession','PROFESSION']) || null,
@@ -403,14 +406,15 @@ const DB = {
       const caller = devCallerMap[d.data().devoteeId];
       return !caller || submittedCallers.has(caller);
     }).length;
-    const present   = at.size;
-    // "New" = anyone marked isNewDevotee on attendance record OR a devotee whose
-    // dateOfJoining matches this session date (direct DB additions)
-    const flaggedIds = new Set(at.docs.filter(d => d.data().isNewDevotee).map(d => d.data().devoteeId));
-    allDevotees.forEach(d => {
-      if (d.dateOfJoining === sessionDate && d.isActive !== false) flaggedIds.add(d.id);
-    });
-    return { confirmed, present, newDevotees: flaggedIds.size, totalPresent: present };
+    const totalPresent = at.size;                       // everyone who attended
+    // "New" = attendance records explicitly flagged isNewDevotee (registered at door)
+    const newAttendedIds = new Set(
+      at.docs.filter(d => d.data().isNewDevotee).map(d => d.data().devoteeId)
+    );
+    const newDevotees    = newAttendedIds.size;
+    const present        = totalPresent - newDevotees;  // returning devotees only
+    // totalPresent = present + newDevotees  →  43 = 33 + 10  (no double-count)
+    return { confirmed, present, newDevotees, totalPresent };
   },
 
   /* ATTENDANCE */
@@ -693,21 +697,21 @@ const DB = {
     }
   },
 
-  async getCallingHistory(devoteeId, weeksBefore = 2) {
-    const weeks = [];
-    const d = new Date(); const day = d.getDay();
-    d.setDate(d.getDate() - day);
-    for (let i = 0; i < weeksBefore; i++) {
-      weeks.push(d.toISOString().split('T')[0]);
-      d.setDate(d.getDate() - 7);
-    }
-    const snaps = await Promise.all(weeks.map(w =>
-      fdb.collection('callingStatus').where('devoteeId', '==', devoteeId).where('weekDate', '==', w).limit(1).get()
-    ));
-    return weeks.map((w, i) => {
-      const doc = snaps[i].docs[0];
-      return doc ? { weekDate: w, ...doc.data(), id: doc.id } : { weekDate: w, comingStatus: null };
-    });
+  async getCallingHistory(devoteeId, weeksBefore = 4) {
+    // Fetch all callingStatus records for this devotee, sort by weekDate descending,
+    // take the most recent N. This avoids:
+    //   1. The UTC/IST bug (toISOString gives wrong date in IST)
+    //   2. The calling-date vs session-date mismatch (callingStatus.weekDate is the
+    //      calling Saturday, not the session Sunday — generating Sundays to look up
+    //      would never match)
+    const snap = await fdb.collection('callingStatus')
+      .where('devoteeId', '==', devoteeId)
+      .get();
+    return snap.docs
+      .map(d => ({ weekDate: d.data().weekDate, ...d.data(), id: d.id }))
+      .filter(d => d.weekDate)
+      .sort((a, b) => b.weekDate.localeCompare(a.weekDate))
+      .slice(0, weeksBefore);
   },
 
   async getLateSubmissions(weekDate, afterHour = 21) {
@@ -744,18 +748,117 @@ const DB = {
     const now = new Date().toISOString();
     const docRef = fdb.collection('callingSubmissions').doc(docId);
     const existing = await docRef.get();
+
     if (existing.exists && existing.data().initialSubmittedAtClient) {
-      await docRef.update({
+      // Resubmit — snapshot changed statuses and write a history entry
+      const prevClient = existing.data().submittedAtClient || existing.data().initialSubmittedAtClient;
+      let changedStatuses = [];
+      try {
+        const csSnap = await fdb.collection('callingStatus')
+          .where('weekDate', '==', weekDate)
+          .where('callingBy', '==', userName)
+          .get();
+        csSnap.docs.forEach(d => {
+          const dd = d.data();
+          const updAt = dd.updatedAtClient || dd.updatedAt?.toDate?.()?.toISOString?.() || '';
+          if (updAt > prevClient) {
+            changedStatuses.push({
+              devoteeId:    dd.devoteeId    || '',
+              name:         dd.devoteeName  || '',
+              comingStatus: dd.comingStatus || '',
+              reason:       dd.callingReason || '',
+            });
+          }
+        });
+      } catch (_) {}
+
+      const batch = fdb.batch();
+      batch.update(docRef, {
         weekDate, userId, userName, teamName: teamName || '',
         submittedAt: TS(), submittedAtClient: now,
+        resubmitCount: INC(1),
       });
+      batch.set(docRef.collection('resubmitHistory').doc(), {
+        resubmittedAt: TS(), resubmittedAtClient: now,
+        userName, teamName: teamName || '',
+        changedCount: changedStatuses.length,
+        changedStatuses,
+      });
+      await batch.commit();
     } else {
       await docRef.set({
         weekDate, userId, userName, teamName: teamName || '',
         submittedAt: TS(), submittedAtClient: now,
         initialSubmittedAt: TS(), initialSubmittedAtClient: now,
+        resubmitCount: 0,
       });
     }
+  },
+
+  async getCallingResubmitHistory(weekDate, userId) {
+    const docId = `${userId}_${weekDate}`;
+    const snap = await fdb.collection('callingSubmissions').doc(docId)
+      .collection('resubmitHistory')
+      .orderBy('resubmittedAt', 'desc')
+      .get();
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+
+  // Fetch 4-week calling history for the History tab.
+  // Returns { weeks[], devotees[], statusMap, submissionMap }
+  // statusMap[weekDate][devoteeId] = callingStatus doc data
+  // submissionMap[weekDate][callerName] = submittedAtClient string
+  async getCallingHistoryData(filters = {}) {
+    // 1. Find the last 4 distinct calling weeks that have any data.
+    // Simple single-field orderBy — works without a composite index.
+    // Catches empty collection gracefully (returns [] not an error).
+    let weekSnap;
+    try {
+      weekSnap = await fdb.collection('callingStatus')
+        .orderBy('weekDate', 'desc').limit(400).get();
+    } catch (e) {
+      // Firestore may throw if the collection is empty in some SDK versions.
+      console.warn('[CallingHistory] callingStatus query failed:', e.message);
+      weekSnap = { docs: [] };
+    }
+    const allWeeks = [...new Set(weekSnap.docs.map(d => d.data().weekDate).filter(Boolean))];
+    const weeks = allWeeks.slice(0, 4).reverse(); // oldest → newest left→right
+    if (!weeks.length) return { weeks: [], devotees: [], statusMap: {}, submissionMap: {} };
+
+    // 2. All devotees (filtered)
+    let devotees = await DevoteeCache.all();
+    if (filters.team)      devotees = devotees.filter(d => d.teamName === filters.team);
+    if (filters.callingBy) devotees = devotees.filter(d => d.callingBy === filters.callingBy);
+    const devIds = new Set(devotees.map(d => d.id));
+
+    // 3. Fetch all callingStatus and callingSubmissions for those 4 weeks in parallel
+    const [csSnaps, submSnaps] = await Promise.all([
+      Promise.all(weeks.map(w =>
+        fdb.collection('callingStatus').where('weekDate', '==', w).get()
+      )),
+      Promise.all(weeks.map(w =>
+        fdb.collection('callingSubmissions').where('weekDate', '==', w).get()
+      )),
+    ]);
+
+    // 4. Build statusMap and submissionMap
+    const statusMap     = {};
+    const submissionMap = {};
+    weeks.forEach((w, i) => {
+      statusMap[w] = {};
+      submissionMap[w] = {};
+      csSnaps[i].docs.forEach(d => {
+        const dd = d.data();
+        if (devIds.has(dd.devoteeId)) statusMap[w][dd.devoteeId] = { id: d.id, ...dd };
+      });
+      submSnaps[i].docs.forEach(d => {
+        const dd = d.data();
+        // key by userName so we can look up per-caller submission time
+        submissionMap[w][dd.userName] = dd.submittedAtClient || dd.initialSubmittedAtClient || null;
+      });
+    });
+
+    return { weeks, devotees, statusMap, submissionMap };
   },
 
   async getCallingSubmissions(weekDates) {
@@ -967,7 +1070,9 @@ const DB = {
     if (!sessionDate) {
       const d = new Date(callingDate + 'T00:00:00');
       d.setDate(d.getDate() + 1);
-      sessionDate = d.toISOString().slice(0, 10);
+      // Use localDateStr — NOT toISOString() — because toISOString() returns UTC,
+      // rolling the date back in IST (UTC+5:30), causing "class not held yet" error.
+      sessionDate = localDateStr(d);
     }
     const [all, csSnap, sessSnap] = await Promise.all([
       DevoteeCache.all(),

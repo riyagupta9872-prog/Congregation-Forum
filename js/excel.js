@@ -707,6 +707,7 @@ async function _buildAndDownloadDevoteeWorkbook({ devotees, includeTeamCol, file
         'Facilitator':        { v: d.facilitator || '',      s: dataCell() },
         'Reference By':       { v: d.referenceBy || '',      s: dataCell() },
         'Calling By':         { v: d.callingBy || '',        s: dataCell() },
+        'Remarks':            { v: d.remarks || '',          s: dataCell({ left: true, wrap: true }) },
         'Education':          { v: d.education || '',        s: dataCell({ left: true }) },
         'Profession':         { v: d.profession || '',       s: dataCell({ left: true }) },
         'Chanting Rounds':    { v: d.chantingRounds || 0,    s: dataCell({ bold: true }) },
@@ -987,6 +988,7 @@ async function _buildAndDownloadDevoteeWorkbook({ devotees, includeTeamCol, file
           'Facilitator':       { v: d.facilitator || '',      s: dataCell() },
           'Reference By':      { v: d.referenceBy || '',      s: dataCell() },
           'Calling By':        { v: d.callingBy || '',        s: dataCell() },
+          'Remarks':           { v: d.remarks || '',          s: dataCell({ left: true, wrap: true }) },
           'Education':         { v: d.education || '',        s: dataCell({ left: true }) },
           'Profession':        { v: d.profession || '',       s: dataCell({ left: true }) },
           'Chanting Rounds':   { v: d.chantingRounds || 0,    s: dataCell({ bold: true }) },
@@ -1189,6 +1191,7 @@ const IMPORT_FIELDS = [
   { key: 'referenceBy',        label: 'Reference By',            aliases: ['Reference','Ref','Reference By','Referred By','Ref-2','ref','Ref 2','reference'] },
   { key: 'facilitator',        label: 'Facilitator',             aliases: ['Facilitator','facilitator','Faciltr'] },
   { key: 'callingBy',          label: 'Calling By',              aliases: ['Calling By','Called By','Caller','Calling by','calling by','CallingBy'] },
+  { key: 'remarks',            label: 'Remarks',                 aliases: ['Remarks','remarks','Notes','notes','Comment','comment'] },
 ];
 
 let _importRows = [], _importMode = 'add';
@@ -1624,6 +1627,7 @@ async function importWithMapping(rows, colMap, mode = 'add') {
           referenceBy:         String(getField(row, 'referenceBy')) || null,
           facilitator:         String(getField(row, 'facilitator')) || null,
           callingBy:           String(getField(row, 'callingBy')) || null,
+          remarks:             String(getField(row, 'remarks')) || null,
           isActive: true, inactivityFlag: false, updatedAt: TS(),
         };
         Object.keys(payload).forEach(k => { if (payload[k] === 'null' || payload[k] === '') payload[k] = null; });

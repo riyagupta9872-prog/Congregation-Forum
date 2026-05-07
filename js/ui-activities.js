@@ -554,11 +554,48 @@ function _actExportExcel(key) {
 }
 
 // ── React to filter ribbon changes ──────────────────────
-window.addEventListener('filtersChanged', () => {
+window.addEventListener('filtersChanged', (e) => {
   const tab = AppState.currentTab;
   if (['books','service','registration','donation'].includes(tab)) {
     const sub = AppState._actSubTab?.[tab] || 'log';
-    if (sub === 'log')     _actLoadRecent(tab);
-    if (sub === 'reports') _actLoadReport(tab);
+    if (sub === 'log') _actLoadRecent(tab);
+    if (sub === 'reports') {
+      // If the session filter changed, sync the date pickers to the new
+      // session week before reloading — otherwise the range stays stale.
+      if (e.detail?.sessionId !== e.detail?.before?.sessionId) {
+        _actSyncRangeFromFilters(tab); // also calls _actLoadReport internally
+      } else {
+        _actLoadReport(tab);
+      }
+    }
+  }
+  // Also update Accuracy report if it's visible
+  if (AppState.currentTab !== 'attendance') return;
+  const accEl = document.getElementById('subtab-att-accuracy');
+  if (accEl && !accEl.classList.contains('hidden') && accEl.classList.contains('active')) {
+    loadAttAccuracyReport?.();
   }
 });
+
+// Navigate to an activity tab and open its Reports sub-tab directly.
+// Called by the clickable KPI dashboard tiles.
+function navToActivityReports(tab) {
+  const btn = document.querySelector(`.tab-btn[data-tab="${tab}"]`);
+  if (btn && typeof switchTab === 'function') switchTab(tab, btn);
+  // Open the Reports sub-tab after the tab panel renders
+  setTimeout(() => {
+    const cfg = ACTIVITY_CONFIG[tab];
+    if (!cfg) return;
+    const p = cfg.prefix;
+    const reportsBtn = document.querySelector(`#tab-${tab} .act-sub-tab[onclick*="'reports'"]`);
+    if (reportsBtn) reportsBtn.click();
+    else {
+      // Panel not built yet — build it then open reports
+      loadActivityTab(tab);
+      setTimeout(() => {
+        const rb = document.querySelector(`#tab-${tab} .act-sub-tab[onclick*="'reports'"]`);
+        if (rb) rb.click();
+      }, 400);
+    }
+  }, 80);
+}

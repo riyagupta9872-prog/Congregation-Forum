@@ -3768,3 +3768,8 @@ button.fab:hover { transform: scale(1.1) rotate(90deg); box-shadow: 0 8px 28px r
 .attendance-sheet-wrap {
   -webkit-overflow-scrolling: touch;
 }
+
+/* Clickable KPI dashboard tiles */
+.dash-kpi[onclick] { transition: transform .12s, box-shadow .12s; }
+.dash-kpi[onclick]:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(26,92,58,.15); }
+.dash-kpi[onclick]:active { transform: translateY(0); }
