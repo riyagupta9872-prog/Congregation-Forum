@@ -126,7 +126,7 @@ function getFilterCallingBy() { return AppState.filters?.callingBy || ''; }
 function getFilterSessionId() { return AppState.filters?.sessionId || null; }
 
 // ── TEAMS LIST (single source of truth) ───────────────
-const TEAMS = ['Vasudeva','Sankarshan','Pradyumna','Anirudha','Other'];
+const TEAMS = ['Vasudeva','Sankarshan','Pradyumna','Anirudha','Rohini','Rukmini','Kalindi','Satyabhama','Jamvanti','Lakshmana','Kaushal','Bhadra','Other','Other ICF_Prji','Other ICF_Mtg'];
 
 // ── ATTENDANCE TIME COLOUR ─────────────────────────────
 function attTimeStyle(markedAtISO) {

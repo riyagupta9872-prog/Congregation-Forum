@@ -153,6 +153,7 @@ async function openProfileModal(id) {
         <div class="profile-fields">
           <div class="profile-field full"><label>Residential Address</label><span>${d.address || '—'}</span></div>
           <div class="profile-field"><label>Date of Birth</label><span>${formatDate(d.dob)}${isBirthdayWeek(d.dob) ? ' 🎂' : ''}</span></div>
+          <div class="profile-field"><label>Gender</label><span>${d.gender || '—'}</span></div>
           <div class="profile-field"><label>Date of Marriage</label><span>${formatDate(d.date_of_marriage)}${isAnniversaryWeek(d.date_of_marriage) ? ' 💍' : ''}</span></div>
           <div class="profile-field"><label>Mobile (Primary)</label><span>${d.mobile || '—'}</span></div>
           <div class="profile-field"><label>Alternate Mobile</label><span>${d.mobile_alt || '—'}</span></div>
@@ -345,6 +346,7 @@ function openDevoteeFormModal(fromAttendance = false, editId = null) {
 function clearDevoteeForm() {
   ['f-name','f-mobile','f-mobile-alt','f-address','f-education','f-email','f-profession','f-hobbies','f-family-members','f-family-participants'].forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
   document.getElementById('f-dob').value = '';
+  const fGender = document.getElementById('f-gender'); if (fGender) fGender.value = '';
   const fDom = document.getElementById('f-dom'); if (fDom) fDom.value = '';
   const fRem = document.getElementById('f-remarks'); if (fRem) fRem.value = '';
   document.getElementById('f-joining').value = getToday();
@@ -383,6 +385,7 @@ async function populateEditForm(id) {
     const fMobileAlt = document.getElementById('f-mobile-alt'); if (fMobileAlt) fMobileAlt.value = d.mobile_alt || '';
     document.getElementById('f-address').value  = d.address || '';
     document.getElementById('f-dob').value      = d.dob || '';
+    const fGenderEl = document.getElementById('f-gender'); if (fGenderEl) fGenderEl.value = d.gender || '';
     const fDomEl = document.getElementById('f-dom'); if (fDomEl) fDomEl.value = d.date_of_marriage || '';
     const fRemEl = document.getElementById('f-remarks'); if (fRemEl) fRemEl.value = d.remarks || '';
     document.getElementById('f-joining').value  = d.date_of_joining || '';
@@ -434,6 +437,7 @@ function getFormPayload() {
     mobile_alt:        (document.getElementById('f-mobile-alt')?.value || '').replace(/\D/g,'').slice(0,10),
     address:           document.getElementById('f-address').value.trim(),
     dob:               document.getElementById('f-dob').value,
+    gender:            document.getElementById('f-gender')?.value || '',
     date_of_marriage:  document.getElementById('f-dom')?.value || '',
     date_of_joining:   document.getElementById('f-joining').value,
     chanting_rounds:   parseInt(document.getElementById('f-chanting').value) || 0,

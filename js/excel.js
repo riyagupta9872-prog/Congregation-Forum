@@ -700,6 +700,7 @@ async function _buildAndDownloadDevoteeWorkbook({ devotees, includeTeamCol, file
         'Mobile':             { v: d.mobile || '',           s: dataCell() },
         'Alternate Mobile':   { v: d.mobileAlt || '',        s: dataCell() },
         'D.O.B':              { v: d.dob || '',              s: dataCell() },
+        'Gender':             { v: d.gender || '',           s: dataCell() },
         'Date of Marriage':   { v: d.date_of_marriage || '', s: dataCell() },
         'Address':            { v: d.address || '',          s: dataCell({ left: true, wrap: true }) },
         'E-Mail':             { v: d.email || '',            s: dataCell({ left: true }) },
@@ -890,7 +891,7 @@ async function _buildAndDownloadDevoteeWorkbook({ devotees, includeTeamCol, file
     // Re-Import (Flat) sheet — simple flat sheet for lossless re-import.
     {
       const flatHeaders = [
-        'Name', 'Mobile', 'Alternate Mobile', 'Address', 'DOB',
+        'Name', 'Mobile', 'Alternate Mobile', 'Address', 'DOB', 'Gender',
         'Date of Joining', 'Chanting Rounds', 'Kanthi', 'Gopi Dress', 'Tilak',
         'Team', 'Status', 'Facilitator', 'Reference', 'Calling By',
         'Education', 'Email', 'Profession', 'Family Favourable', 'Reading', 'Hearing',
@@ -903,7 +904,7 @@ async function _buildAndDownloadDevoteeWorkbook({ devotees, includeTeamCol, file
         .sort((a, b) => (a.teamName || '').localeCompare(b.teamName || '') || (a.name || '').localeCompare(b.name || ''));
       sortedAll.forEach(d => {
         flatRows.push([
-          d.name || '', d.mobile || '', d.mobileAlt || '', d.address || '', d.dob || '', d.dateOfMarriage || '',
+          d.name || '', d.mobile || '', d.mobileAlt || '', d.address || '', d.dob || '', d.gender || '', d.dateOfMarriage || '',
           d.dateOfJoining || '', d.chantingRounds || 0,
           yn(d.kanthi), yn(d.gopiDress), yn(d.tilak),
           d.teamName || '', d.devoteeStatus || '',
@@ -981,6 +982,7 @@ async function _buildAndDownloadDevoteeWorkbook({ devotees, includeTeamCol, file
           'Mobile':            { v: d.mobile || '',           s: dataCell() },
           'Alternate Mobile':  { v: d.mobileAlt || '',        s: dataCell() },
           'D.O.B':             { v: d.dob || '',              s: dataCell() },
+          'Gender':            { v: d.gender || '',           s: dataCell() },
           'Date of Marriage':  { v: d.date_of_marriage || '', s: dataCell() },
           'Address':           { v: d.address || '',          s: dataCell({ left: true, wrap: true }) },
           'E-Mail':            { v: d.email || '',            s: dataCell({ left: true }) },
@@ -1058,7 +1060,7 @@ function downloadImportTemplate() {
 
   const headers = [
     // Personal Identity
-    'Name', 'Mobile', 'Alternate Mobile', 'DOB', 'Email', 'Address',
+    'Name', 'Mobile', 'Alternate Mobile', 'DOB', 'Gender', 'Email', 'Address',
     // Team Management
     'Team', 'Facilitator', 'Reference', 'Calling By',
     // Professional
@@ -1073,7 +1075,7 @@ function downloadImportTemplate() {
     'Status',
   ];
   const sample1 = [
-    'Radha Kumari', '9876543210', '9811122233', '2000-06-15', 'radha@example.com', 'C-12, Sector 5, Noida',
+    'Radha Kumari', '9876543210', '9811122233', '2000-06-15', 'Female', 'radha@example.com', 'C-12, Sector 5, Noida',
     'Champaklata', 'Anjali Mishra Mtg', 'Priya Devi', 'Anjali Mishra Mtg',
     'B.Com', 'Housewife',
     '16', 'Regular', 'Daily',
@@ -1083,7 +1085,7 @@ function downloadImportTemplate() {
     'Serious',
   ];
   const sample2 = [
-    'Sita Devi', '8765432109', '', '1998-03-22', '', 'B-4, Govind Nagar, Mathura',
+    'Sita Devi', '8765432109', '', '1998-03-22', 'Female', '', 'B-4, Govind Nagar, Mathura',
     'Lalita', 'Neha Bhandari', '', 'Neha Bhandari',
     '12th Pass', 'Student',
     '8', 'Occasionally', 'Occasionally',
@@ -1127,6 +1129,7 @@ function downloadImportTemplate() {
     ['Mobile', '10-digit number, no spaces or dashes', 'Recommended'],
     ['Alternate Mobile', '10-digit number (only if a 2nd number is known)', 'Optional'],
     ['DOB', 'YYYY-MM-DD  (e.g. 2000-06-15)', 'Optional'],
+    ['Gender', 'Male  |  Female  |  Other', 'Optional'],
     ['Email', 'Valid email address', 'Optional'],
     ['Address', 'Full address', 'Optional'],
     ['Team', teams.join('  |  '), 'Optional'],
@@ -1165,6 +1168,7 @@ function downloadImportTemplate() {
 const IMPORT_FIELDS = [
   { key: 'name',               label: 'Name *',                  aliases: ['Name','name','Full Name','Devotee Name','NAAM'] },
   { key: 'dob',                label: 'Date of Birth',           aliases: ['DOB','D.O.B','Date of Birth','Birth Date','dob','D.O.B.','DOB (DD/MM/YYYY)'] },
+  { key: 'gender',             label: 'Gender',                  aliases: ['Gender','gender','Sex','sex'] },
   { key: 'dateOfMarriage',     label: 'Date of Marriage',        aliases: ['Date of Marriage','Marriage Date','DOM','Anniversary','dom','Marriage','DateOfMarriage'] },
   { key: 'mobile',             label: 'Mobile',                  aliases: ['Mobile','Contact','Phone','Mobile Number','Mobile (10 digits)','Contact Number','Mob','Ph No','mob no','contact'] },
   { key: 'mobileAlt',          label: 'Alternate Mobile',        aliases: ['Alternate Mobile','Alt Mobile','Mobile 2','Alt Number','Alternate Number','Second Mobile','Secondary Mobile','Mob 2','alt mobile','Alternate Contact'] },
@@ -1605,6 +1609,7 @@ async function importWithMapping(rows, colMap, mode = 'add') {
           mobileAlt:           mobileAlt || null,
           address:             String(getField(row, 'address')) || null,
           dob:                 importDate(getField(row, 'dob')) || null,
+          gender:              String(getField(row, 'gender')) || null,
           email:               String(getField(row, 'email')) || null,
           education:           String(getField(row, 'education')) || null,
           profession:          String(getField(row, 'profession')) || null,

@@ -1,5 +1,5 @@
 ﻿/* ══ SERVICE WORKER – Congregation Forum ══ */
-const CACHE = 'congregation-forum-v16';
+const CACHE = 'congregation-forum-v18';
 const SHELL = [
   './index.html',
   './js/config.js',

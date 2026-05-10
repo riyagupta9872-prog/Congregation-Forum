@@ -84,8 +84,10 @@
         <label>Your Team</label>
         <select id="signup-team">
           <option value="">Select Team</option>
-          <option>Vasudeva</option><option>Sankarshan</option><option>Pradyumna</option>
-          <option>Anirudha</option><option>Other</option>
+          <option>Vasudeva</option><option>Sankarshan</option><option>Pradyumna</option><option>Anirudha</option>
+          <option>Rohini</option><option>Rukmini</option><option>Kalindi</option><option>Satyabhama</option>
+          <option>Jamvanti</option><option>Lakshmana</option><option>Kaushal</option><option>Bhadra</option>
+          <option>Other</option><option>Other ICF_Prji</option><option>Other ICF_Mtg</option>
         </select>
       </div>
       <button type="submit" class="auth-btn"><i class="fas fa-user-plus"></i> Request Account</button>
@@ -1038,6 +1040,15 @@
             <input type="date" id="f-dom">
           </div>
           <div class="form-group">
+            <label>Gender <span class="field-hint">(optional)</span></label>
+            <select id="f-gender">
+              <option value="">— Select —</option>
+              <option>Male</option>
+              <option>Female</option>
+              <option>Other</option>
+            </select>
+          </div>
+          <div class="form-group">
             <label>Mobile Number <span class="req">*</span></label>
             <input type="tel" id="f-mobile" placeholder="10-digit number"
               inputmode="numeric" maxlength="10"
@@ -1518,7 +1529,10 @@
         <label>Current Team Name</label>
         <select id="rename-team-from" class="filter-select" style="width:100%">
           <option value="">— Select team to rename —</option>
-          <option>Vasudeva</option><option>Sankarshan</option><option>Pradyumna</option><option>Anirudha</option><option>Other</option>
+          <option>Vasudeva</option><option>Sankarshan</option><option>Pradyumna</option><option>Anirudha</option>
+          <option>Rohini</option><option>Rukmini</option><option>Kalindi</option><option>Satyabhama</option>
+          <option>Jamvanti</option><option>Lakshmana</option><option>Kaushal</option><option>Bhadra</option>
+          <option>Other</option><option>Other ICF_Prji</option><option>Other ICF_Mtg</option>
         </select>
       </div>
       <div class="form-group" style="margin-top:.75rem">
@@ -1835,8 +1849,10 @@
         <label>Team</label>
         <select id="edit-profile-team" class="form-control">
           <option value="">No Team</option>
-          <option>Vasudeva</option><option>Sankarshan</option><option>Pradyumna</option>
-          <option>Anirudha</option><option>Other</option>
+          <option>Vasudeva</option><option>Sankarshan</option><option>Pradyumna</option><option>Anirudha</option>
+          <option>Rohini</option><option>Rukmini</option><option>Kalindi</option><option>Satyabhama</option>
+          <option>Jamvanti</option><option>Lakshmana</option><option>Kaushal</option><option>Bhadra</option>
+          <option>Other</option><option>Other ICF_Prji</option><option>Other ICF_Mtg</option>
         </select>
         <div id="edit-profile-team-readonly" class="form-control" style="display:none;background:var(--accent-light);color:var(--text-muted);cursor:default"></div>
         <p id="edit-profile-team-note" style="font-size:.72rem;color:var(--text-muted);margin-top:.25rem;display:none">Contact Super Admin to change your team.</p>
@@ -1884,8 +1900,10 @@
       <div id="mgmt-team-picker" style="display:none;flex-direction:column;gap:.4rem">
         <select id="mgmt-new-team" class="form-control">
           <option value="">Select Team…</option>
-          <option>Vasudeva</option><option>Sankarshan</option><option>Pradyumna</option>
-          <option>Anirudha</option><option>Other</option>
+          <option>Vasudeva</option><option>Sankarshan</option><option>Pradyumna</option><option>Anirudha</option>
+          <option>Rohini</option><option>Rukmini</option><option>Kalindi</option><option>Satyabhama</option>
+          <option>Jamvanti</option><option>Lakshmana</option><option>Kaushal</option><option>Bhadra</option>
+          <option>Other</option><option>Other ICF_Prji</option><option>Other ICF_Mtg</option>
         </select>
         <button class="btn btn-primary" onclick="doMgmtAction('team_confirm')"><i class="fas fa-check"></i> Confirm Team Change</button>
       </div>
@@ -1943,8 +1961,10 @@
         <label>New Team</label>
         <select id="bulk-team">
           <option value="">— Select team —</option>
-          <option>Vasudeva</option><option>Sankarshan</option><option>Pradyumna</option>
-          <option>Anirudha</option><option>Other</option>
+          <option>Vasudeva</option><option>Sankarshan</option><option>Pradyumna</option><option>Anirudha</option>
+          <option>Rohini</option><option>Rukmini</option><option>Kalindi</option><option>Satyabhama</option>
+          <option>Jamvanti</option><option>Lakshmana</option><option>Kaushal</option><option>Bhadra</option>
+          <option>Other</option><option>Other ICF_Prji</option><option>Other ICF_Mtg</option>
         </select>
       </div>
       <div class="form-group" id="bulk-callingby-wrap" style="display:none">
@@ -2163,8 +2183,10 @@
         <label><i class="fas fa-users"></i> Team</label>
         <select id="ua-team">
           <option value="">No Team</option>
-          <option>Vasudeva</option><option>Sankarshan</option><option>Pradyumna</option>
-          <option>Anirudha</option><option>Other</option>
+          <option>Vasudeva</option><option>Sankarshan</option><option>Pradyumna</option><option>Anirudha</option>
+          <option>Rohini</option><option>Rukmini</option><option>Kalindi</option><option>Satyabhama</option>
+          <option>Jamvanti</option><option>Lakshmana</option><option>Kaushal</option><option>Bhadra</option>
+          <option>Other</option><option>Other ICF_Prji</option><option>Other ICF_Mtg</option>
         </select>
       </div>
       <div class="form-group">
