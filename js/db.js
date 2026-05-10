@@ -158,7 +158,7 @@ const DB = {
     if (!doc.exists) throw new Error('Not found');
     const ex = doc.data();
     const updates = { ...toCamel(formData), updatedAt: TS() };
-    const trackMap = { name:'name', mobile:'mobile', chantingRounds:'chanting_rounds', kanthi:'kanthi', gopiDress:'gopi_dress', teamName:'team_name', devoteeStatus:'devotee_status', facilitator:'facilitator', referenceBy:'reference_by', callingBy:'calling_by' };
+    const trackMap = { name:'name', mobile:'mobile', chantingRounds:'chanting_rounds', kanthi:'kanthi', gopiDress:'gopi_dress', teamName:'team_name', devoteeStatus:'devotee_status', facilitator:'facilitator', referenceBy:'reference_by', callingBy:'calling_by', remarks:'remarks' };
     const batch = fdb.batch();
     Object.entries(trackMap).forEach(([fKey, formKey]) => {
       const nv = updates[fKey], ov = ex[fKey];
@@ -563,6 +563,40 @@ const DB = {
     return true;
   },
 
+  // On-demand team rename — updates all collections in one go.
+  // Unlike migrateTeamNameOnce this has no "run once" guard so admins
+  // can invoke it any time from the admin panel.
+  async renameTeam(oldName, newName) {
+    if (!oldName || !newName || oldName === newName) throw new Error('Invalid team names');
+    const BATCH = 400;
+    const collections = ['devotees','users','callingStatus','callingSubmissions',
+      'attendanceRecords','bookDistributions','services','registrations','donations'];
+    let totalUpdated = 0;
+    for (const col of collections) {
+      try {
+        const snap = await fdb.collection(col).where('teamName', '==', oldName).get();
+        for (let i = 0; i < snap.docs.length; i += BATCH) {
+          const batch = fdb.batch();
+          snap.docs.slice(i, i + BATCH).forEach(d => batch.update(d.ref, { teamName: newName }));
+          await batch.commit();
+          totalUpdated += Math.min(BATCH, snap.docs.length - i);
+        }
+      } catch (_) {}
+    }
+    // Also fix attendanceTargets settings doc
+    try {
+      const tDoc = await fdb.collection('settings').doc('attendanceTargets').get();
+      if (tDoc.exists && tDoc.data().teams?.[oldName] !== undefined) {
+        const teams = { ...tDoc.data().teams };
+        teams[newName] = teams[oldName];
+        delete teams[oldName];
+        await fdb.collection('settings').doc('attendanceTargets').update({ teams });
+      }
+    } catch (_) {}
+    DevoteeCache.bust();
+    return totalUpdated;
+  },
+
   // When a coordinator renames themselves, propagate the new name to every
   // devotee whose callingBy field still holds the old name.
   async updateCallingByName(oldName, newName) {
@@ -645,6 +679,48 @@ const DB = {
     }));
   },
 
+  // Team Calling tab — all facilitators' calling lists for oversight.
+  // superAdmin: all teams (filtered via master filter bar in UI).
+  // teamAdmin: own team only.
+  async getTeamCallingStatus(weekDate) {
+    const [raw, csSnap, cfgSnap, submSnap] = await Promise.all([
+      DevoteeCache.all(),
+      fdb.collection('callingStatus').where('weekDate', '==', weekDate).get(),
+      fdb.collection('settings').doc('callingWeek').get(),
+      fdb.collection('callingSubmissions').where('weekDate', '==', weekDate).get(),
+    ]);
+    const csMap = {};
+    csSnap.docs.forEach(d => { csMap[d.data().devoteeId] = { id: d.id, ...d.data() }; });
+    const sessionType = cfgSnap.exists ? (cfgSnap.data().sessionType || 'regular') : 'regular';
+    const isFestival  = sessionType === 'festival';
+    const submittedCallers = new Set(submSnap.docs.map(d => d.data().userName).filter(Boolean));
+
+    let filtered = raw.filter(d => {
+      if (d.isNotInterested) return false;
+      if (d.callingMode === 'not_interested') return false;
+      if (d.callingMode === 'online') return false;
+      if (d.callingMode === 'festival') {
+        if (!isFestival) return false;
+        return !!(d.callingBy && d.callingBy.trim());
+      }
+      return !!(d.callingBy && d.callingBy.trim());
+    });
+    // teamAdmin sees only their own team; superAdmin sees all
+    if (AppState.userRole === 'teamAdmin' && AppState.userTeam) {
+      filtered = filtered.filter(d => d.teamName === AppState.userTeam);
+    }
+    const devotees = filtered.map(d => ({
+      ...toSnake(d),
+      coming_status:     csMap[d.id]?.comingStatus    || null,
+      calling_notes:     csMap[d.id]?.callingNotes    || null,
+      calling_reason:    csMap[d.id]?.callingReason   || null,
+      available_from:    csMap[d.id]?.availableFrom   || null,
+      calling_id:        csMap[d.id]?.id              || null,
+      updated_at_client: csMap[d.id]?.updatedAtClient || null,
+    }));
+    return { devotees, submittedCallers };
+  },
+
   async getUsersForTeam(team, search = '') {
     const snap = await fdb.collection('users').get();
     let users = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
@@ -693,7 +769,25 @@ const DB = {
       payload.createdAtClient = now.toISOString();
       await fdb.collection('callingStatus').add(payload);
     } else {
+      const prev = snap.docs[0].data();
       await snap.docs[0].ref.update(payload);
+
+      // Record what changed so coordinators can see the full edit history.
+      // Only write a history entry when something meaningful actually changed.
+      const changes = {};
+      if ((prev.comingStatus  || '') !== (payload.comingStatus  || '')) changes.comingStatus  = { from: prev.comingStatus  || '', to: payload.comingStatus  || '' };
+      if ((prev.callingReason || '') !== (payload.callingReason || '')) changes.callingReason = { from: prev.callingReason || '', to: payload.callingReason || '' };
+      if ((prev.callingNotes  || '') !== (payload.callingNotes  || '')) changes.callingNotes  = { from: prev.callingNotes  || '', to: payload.callingNotes  || '' };
+      if (Object.keys(changes).length) {
+        await fdb.collection('callingStatusChanges').add({
+          devoteeId,
+          weekDate,
+          changedAt:       TS(),
+          changedAtClient: now.toISOString(),
+          changedBy:       AppState.userName || '',
+          changes,
+        });
+      }
     }
   },
 
@@ -712,6 +806,84 @@ const DB = {
       .filter(d => d.weekDate)
       .sort((a, b) => b.weekDate.localeCompare(a.weekDate))
       .slice(0, weeksBefore);
+  },
+
+  // Returns last 4 calling weeks + per-devotee status + which devotee+week combos
+  // had post-submission edits (for the pencil icon in the Calling History grid).
+  async getCallingHistoryGrid(teamFilter, callerFilter) {
+    const saturdays = [];
+    const anchor = new Date();
+    const dayOfWeek = anchor.getDay();
+    const daysToSat = dayOfWeek === 6 ? 0 : dayOfWeek + 1;
+    anchor.setDate(anchor.getDate() - daysToSat);
+    for (let i = 0; i < 4; i++) {
+      const d = new Date(anchor);
+      d.setDate(d.getDate() - i * 7);
+      saturdays.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`);
+    }
+    saturdays.reverse(); // oldest → newest
+
+    const oldestWeek = saturdays[0];
+
+    const [allDevotees, csSnaps, changesResult, submSnaps] = await Promise.all([
+      DevoteeCache.all(),
+      fdb.collection('callingStatus').where('weekDate', 'in', saturdays).get(),
+      fdb.collection('callingStatusChanges').where('weekDate', '>=', oldestWeek).get()
+        .catch(() => ({ docs: [] })),
+      fdb.collection('callingSubmissions').where('weekDate', '>=', oldestWeek).get(),
+    ]);
+
+    const csMap = {};
+    csSnaps.docs.forEach(d => {
+      const dt = d.data();
+      csMap[`${dt.devoteeId}__${dt.weekDate}`] = dt;
+    });
+
+    const editedSet = new Set();
+    changesResult.docs.forEach(d => {
+      const dt = d.data();
+      editedSet.add(`${dt.devoteeId}__${dt.weekDate}`);
+    });
+
+    const submMap = {};
+    saturdays.forEach(w => { submMap[w] = new Set(); });
+    submSnaps.docs.forEach(d => {
+      const { weekDate, userName } = d.data();
+      if (submMap[weekDate]) submMap[weekDate].add(userName);
+    });
+
+    let devotees = allDevotees.filter(d => d.isActive !== false && !d.isNotInterested && d.callingBy);
+    if (teamFilter)   devotees = devotees.filter(d => d.teamName  === teamFilter);
+    if (callerFilter) devotees = devotees.filter(d => d.callingBy === callerFilter);
+    devotees.sort((a, b) => (a.teamName || '').localeCompare(b.teamName || '') || (a.name || '').localeCompare(b.name || ''));
+
+    return {
+      weeks: saturdays,
+      submMap,
+      devotees: devotees.map(d => ({
+        id: d.id, name: d.name, teamName: d.teamName, callingBy: d.callingBy,
+        weeks: saturdays.map(w => {
+          const cs = csMap[`${d.id}__${w}`] || null;
+          const wasEdited = editedSet.has(`${d.id}__${w}`);
+          return { weekDate: w, cs, wasEdited };
+        }),
+      })),
+    };
+  },
+
+  async getCallingStatusChanges(devoteeId) {
+    // Last 8 weeks of change history, newest first
+    const cutoff = (() => {
+      const d = new Date(); d.setDate(d.getDate() - 56);
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    })();
+    const snap = await fdb.collection('callingStatusChanges')
+      .where('devoteeId', '==', devoteeId)
+      .where('weekDate', '>=', cutoff)
+      .get();
+    return snap.docs
+      .map(d => ({ id: d.id, ...d.data(), changedAtISO: tsToISO(d.data().changedAt) }))
+      .sort((a, b) => (b.changedAtISO || b.changedAtClient || '').localeCompare(a.changedAtISO || a.changedAtClient || ''));
   },
 
   async getLateSubmissions(weekDate, afterHour = 21) {
@@ -990,11 +1162,11 @@ const DB = {
     return { fourWeeks, submMap, teamRows };
   },
 
-  async getCallingReport(weekDate) {
-    // weekDate is the calling date (Saturday). Derive the session date (Sunday = +1 day).
-    // Use localDateStr() — NOT toISOString() — because toISOString() returns UTC,
-    // which in IST (UTC+5:30) rolls the date back by one day (midnight IST = prior day UTC).
-    const sessionDate = (() => {
+  async getCallingReport(weekDate, sessionDateOverride) {
+    // weekDate is the calling date (Saturday). Derive the session date (Sunday = +1 day)
+    // unless the caller already knows the session date (avoids off-by-one when calling
+    // was done on a non-standard day configured via settings/callingWeek).
+    const sessionDate = sessionDateOverride || (() => {
       const d = new Date(weekDate + 'T00:00:00');
       d.setDate(d.getDate() + 1);
       return localDateStr(d);
@@ -1052,6 +1224,10 @@ const DB = {
             else if (cs.callingReason === 'festival_calling') { s.festival++; }
             else if (cs.callingReason === 'not_interested_now') { s.notInterested++; }
           });
+        } else {
+          // Track how many devotees are in unsubmitted lists — they are effectively
+          // unreported and should surface in the "Not Called" count for the team.
+          result[team].unsubmittedTotal += sub.length;
         }
         s.isCoordinator = userRoleMap[caller]?.role === 'teamAdmin';
         s.position = s.isCoordinator ? 'Coordinator' : (userRoleMap[caller]?.position || 'Calling Facilitator');
@@ -1149,6 +1325,9 @@ const DB = {
       mobile: d.mobile || '',
       team_name: d.teamName || '',
       calling_by: d.callingBy || '',
+      calling_mode: d.callingMode || '',
+      is_not_interested: d.isNotInterested || false,
+      is_active: d.isActive !== false,
       lifetime_attendance: d.lifetimeAttendance || 0,
       chanting_rounds: d.chantingRounds || 0,
       current_status: csCurrentMap[d.id]?.comingStatus || null,

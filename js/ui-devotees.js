@@ -174,7 +174,7 @@ async function openProfileModal(id) {
           <div class="profile-field"><label>Reference By</label><span id="pv-ref-by">${d.reference_by || '—'}</span></div>
           <div class="profile-field"><label>Facilitator</label><span>${d.facilitator || '—'}</span></div>
           <div class="profile-field"><label>Calling By</label><span>${d.calling_by || '—'}</span></div>
-          ${d.remarks ? `<div class="profile-field full"><label>Remarks</label><span style="white-space:pre-wrap">${d.remarks}</span></div>` : ''}
+          ${d.remarks ? `<div class="profile-field full"><label><i class="fas fa-sticky-note" style="color:var(--brand);margin-right:.3rem"></i>Remarks</label><span style="white-space:pre-wrap;font-size:.88rem">${d.remarks}</span></div>` : ''}
         </div>
       </div>
 

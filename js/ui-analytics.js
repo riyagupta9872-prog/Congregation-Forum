@@ -93,14 +93,18 @@ async function loadDashboard() {
       }
     }
 
-    // Activity collections (Books, Services, Registrations, Donations) are
-    // date-stamped per entry. Use a 30-day window ending today (not on the
-    // session date) so entries logged on any day reliably show up — narrower
-    // session-aligned windows accidentally hid logs that lived a few days off.
-    const activityEnd   = today;
-    const activityStart = (() => {
-      const d = new Date(today + 'T00:00:00'); d.setDate(d.getDate() - 30);
-      return d.toISOString().slice(0, 10);
+    // Activity window = the 7-day session week: session Sunday → following Saturday.
+    // This matches how coordinators think — books, services, registrations are
+    // all anchored to the session week. Falls back to the current 7-day week if
+    // no session is selected yet.
+    const activityStart = sessionDate || (() => {
+      const d = new Date(today + 'T00:00:00'); d.setDate(d.getDate() - 6);
+      return localDateStr(d);
+    })();
+    const activityEnd = (() => {
+      const d = new Date(activityStart + 'T00:00:00'); d.setDate(d.getDate() + 6);
+      const sat = localDateStr(d);
+      return sat > today ? today : sat;
     })();
 
     // Every fetch wrapped via safeQuery (timeout + catch fallback), so one
@@ -213,9 +217,12 @@ async function loadDashboard() {
     const liveLabel = liveSession
       ? new Date(liveSession + 'T00:00:00').toLocaleDateString('en-IN', { weekday:'short', day:'numeric', month:'short' })
       : null;
+    const actStartLabel = new Date(activityStart + 'T00:00:00').toLocaleDateString('en-IN', { day:'numeric', month:'short' });
+    const actEndLabel   = new Date(activityEnd   + 'T00:00:00').toLocaleDateString('en-IN', { day:'numeric', month:'short' });
     const subParts = [`<i class="fas fa-clipboard-list" style="font-size:.7rem"></i> Reports for <strong>${sessLabel}</strong>`];
     if (liveLabel) subParts.push(`<i class="fas fa-circle" style="font-size:.45rem;color:#86efac;margin-right:.15rem"></i> Live cycle: <strong>${liveLabel}</strong>`);
     if (filterTeam) subParts.push(`<i class="fas fa-users" style="font-size:.7rem"></i> ${filterTeam}`);
+    subParts.push(`<i class="fas fa-calendar-week" style="font-size:.7rem"></i> Activities: <strong>${actStartLabel} – ${actEndLabel}</strong>`);
     const greetSub = document.getElementById('dash-greet-sub');
     if (greetSub) greetSub.innerHTML = subParts.join(' &nbsp;·&nbsp; ');
     _setText('dash-grid-sub', '');
@@ -1055,9 +1062,26 @@ async function removeEventDevotee(devoteeId) {
 async function exportEventDevotees() {
   if (!AppState.currentEventId) return;
   try {
-    const devotees = await DB.getEventDevotees(AppState.currentEventId);
-    if (!devotees.length) return showToast('No devotees in this event', 'error');
-    const rows = devotees.map(d => ({ Name: d.name, Mobile: d.mobile || '', Team: d.team_name || '' }));
+    const [eventDevotees, allDevotees] = await Promise.all([
+      DB.getEventDevotees(AppState.currentEventId),
+      DevoteeCache.all(),
+    ]);
+    if (!eventDevotees.length) return showToast('No devotees in this event', 'error');
+    const devMap = Object.fromEntries(allDevotees.map(d => [d.id, d]));
+    const rows = eventDevotees.map(d => {
+      const full = devMap[d.devotee_id] || {};
+      return {
+        Name:              d.name,
+        Mobile:            d.mobile || '',
+        Team:              d.team_name || '',
+        'Chanting Rounds': full.chantingRounds || 0,
+        'Gopi Dress':      full.gopiDress ? 'Yes' : 'No',
+        Tilak:             full.tilak ? 'Yes' : 'No',
+        Kanthi:            full.kanthi ? 'Yes' : 'No',
+        'Lifetime AT':     full.lifetimeAttendance || 0,
+        Remarks:           full.remarks || '',
+      };
+    });
     downloadExcel(rows, 'event_devotees.xlsx');
   } catch (_) { showToast('Export failed', 'error'); }
 }
@@ -2716,6 +2740,33 @@ async function openPersonalMeetings() {
   openModal('personal-meetings-modal');
   await _loadPersonalMeetings();
 }
+
+function openTeamRenameModal() {
+  document.getElementById('rename-team-from').value = '';
+  document.getElementById('rename-team-to').value = '';
+  document.getElementById('rename-team-result').innerHTML = '';
+  openModal('team-rename-modal');
+}
+window.openTeamRenameModal = openTeamRenameModal;
+
+async function doTeamRename() {
+  const from = document.getElementById('rename-team-from').value.trim();
+  const to   = document.getElementById('rename-team-to').value.trim();
+  const res  = document.getElementById('rename-team-result');
+  if (!from) { res.innerHTML = '<span style="color:var(--danger)">Please select the current team name.</span>'; return; }
+  if (!to)   { res.innerHTML = '<span style="color:var(--danger)">Please enter the new team name.</span>'; return; }
+  if (from === to) { res.innerHTML = '<span style="color:var(--danger)">Old and new names are the same.</span>'; return; }
+  if (!confirm(`Rename team "${from}" → "${to}" everywhere?\n\nThis updates all devotees, calling records, attendance, and activity logs. This cannot be undone.`)) return;
+  res.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Renaming…';
+  try {
+    const count = await DB.renameTeam(from, to);
+    res.innerHTML = `<span style="color:var(--success)"><i class="fas fa-check-circle"></i> Done — ${count} records updated. Refresh the page to see changes.</span>`;
+    DevoteeCache.bust();
+  } catch (e) {
+    res.innerHTML = `<span style="color:var(--danger)"><i class="fas fa-exclamation-circle"></i> Failed: ${e.message || 'Unknown error'}</span>`;
+  }
+}
+window.doTeamRename = doTeamRename;
 
 async function _loadPersonalMeetings() {
   const body = document.getElementById('personal-meetings-body');
