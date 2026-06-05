@@ -1,5 +1,7 @@
-﻿/* ══ SERVICE WORKER – Congregation Forum ══ */
-const CACHE = 'congregation-forum-v18';
+﻿/* â•â• SERVICE WORKER â€“ Sakhi Sang â•â• */
+// Bump this version string every time you deploy new code.
+// This tells the browser to throw away old cached files and install fresh ones.
+const CACHE = 'congregation-forum-v2';
 const SHELL = [
   './index.html',
   './js/config.js',
@@ -40,6 +42,7 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const url = e.request.url;
 
+  // Firebase / Firestore: always bypass cache, go straight to network
   if (url.includes('firestore.googleapis.com') ||
       url.includes('firebase') ||
       url.includes('googleapis.com/v1') ||
@@ -47,6 +50,9 @@ self.addEventListener('fetch', e => {
     return;
   }
 
+  // App JS files: network-first, cached fallback.
+  // This guarantees users get fresh code after every deployment
+  // without needing a hard refresh. Falls back to cache when offline.
   if (url.includes('/js/')) {
     e.respondWith(
       fetch(e.request)
@@ -62,6 +68,8 @@ self.addEventListener('fetch', e => {
     return;
   }
 
+  // HTML navigation: network-first so the shell is always fresh,
+  // cached fallback for offline use.
   if (e.request.mode === 'navigate') {
     e.respondWith(
       fetch(e.request)
@@ -77,6 +85,8 @@ self.addEventListener('fetch', e => {
     return;
   }
 
+  // Everything else (fonts, icons, CDN libraries, CSS):
+  // cache-first â€” these rarely change and benefit from instant loading.
   e.respondWith(
     caches.match(e.request).then(cached => {
       if (cached) return cached;

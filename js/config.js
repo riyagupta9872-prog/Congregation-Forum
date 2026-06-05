@@ -42,6 +42,11 @@ window.addEventListener('error', e => {
 // ── APP STATE ─────────────────────────────────────────
 const AppState = {
   currentTab: 'devotees',
+  // Legacy single-session ids — kept as live aliases so existing code paths
+  // (DB.getSessionStats, markPresent, etc.) keep working unchanged. They mirror
+  // AppState.filters.sessionId via the derived getters defined below.
+  // _currentSessionId / _currentReportSessionId hold the actual storage; the
+  // public names redirect through Object.defineProperty further down.
   _currentSessionId: null,
   _currentReportSessionId: null,
   currentDevoteeId: null,
@@ -50,47 +55,80 @@ const AppState = {
   callingData: [],
   fromAttendance: false,
   attendanceCandidates: {},
-  sessionsCache: {},
-  isAttSevaDev: false,
+  sessionsCache: {},     // sessionId → session object
+  isAttSevaDev: false,  // extra flag: can access live attendance of all teams (set by superAdmin per user)
+  // ── DELEGATION FLAGS ── per-user "super-admin lite" powers (set by superAdmin per user)
+  canAllTeamCalling: false,  // can submit/edit calling on behalf of any team
+  canAllTeamReports: false,  // can view reports across all teams
+  canManageAllTeams: false,  // full write access app-wide (lite super admin)
   // Auth
-  userRole: null,
-  userTeam: null,
-  userPosition: null,
+  userRole: null,       // 'superAdmin' | 'deptAdmin' | 'teamAdmin' | 'serviceDevotee'
+  userTeam: null,       // team name for coordinators
+  userDept: null,       // department for deptAdmin ('ICF_Prji' | 'ICF_Mtg')
+  userPosition: null,   // free-text position from user profile (e.g. 'Facilitator')
   userName: '',
   userId: null,
-  profilePic: null,
+  profilePic: null,            // base64 string or null
 
   // ── MASTER FILTER STATE ─────────────────────────────────
+  // Single source of truth for context filters (Session / Dept / Team / Calling By).
+  // Every tab's load* function reads from here. Per-tab content filters
+  // (search boxes, status dropdowns) stay local.
   filters: {
-    sessionId:     null,
-    team:          '',
-    callingBy:     '',
-    period:        'session',
-    periodAnchor:  null,
+    sessionId:     null,    // canonical session date 'YYYY-MM-DD'
+    dept:          '',       // '' = All depts | 'ICF_Prji' | 'ICF_Mtg'
+    team:          '',       // '' = All teams
+    callingBy:     '',       // '' = All callers
+    period:        'session',// 'session'|'month'|'quarter'|'fy' (Reports-only)
+    periodAnchor:  null,    // 'YYYY-MM-DD' anchor for period aggregation
   },
 };
 
 // ── FILTER ALIASES ─────────────────────────────────────
+// Existing DB.* calls reference AppState.currentSessionId and
+// AppState.currentReportSessionId. We keep both as derived aliases off the
+// new master filter so nothing else needs touching during scaffolding.
 Object.defineProperty(AppState, 'currentSessionId', {
   get() { return this._currentSessionId; },
-  set(v) { this._currentSessionId = v; },
+  set(v) {
+    // Only stores the Firestore doc ID. filters.sessionId (the date string) is
+    // managed exclusively by dispatchFilters — never write the doc ID there.
+    this._currentSessionId = v;
+  },
   configurable: true,
 });
 Object.defineProperty(AppState, 'currentReportSessionId', {
   get() { return this._currentReportSessionId || this._currentSessionId; },
-  set(v) { this._currentReportSessionId = v; },
+  set(v) {
+    this._currentReportSessionId = v;
+  },
   configurable: true,
 });
 
 // ── FILTER DISPATCHER ──────────────────────────────────
+// Single mutator for the master filter. Validates, derives, fires the
+// 'filtersChanged' event. Tabs subscribe with one listener and re-render only
+// when they're the visible tab.
+//
+// Patch shape: { sessionId, team, callingBy, period, periodAnchor }
 function dispatchFilters(patch) {
   const f = AppState.filters;
   if (!f) return;
   const before = { ...f };
 
+  if (patch.dept !== undefined) {
+    f.dept = patch.dept || '';
+    // When dept changes, clear team if it no longer belongs to the new dept
+    if (f.dept && f.team && !getTeamsForDept(f.dept).includes(f.team)) {
+      f.team = '';
+    }
+  }
+
   if (patch.sessionId !== undefined) {
     f.sessionId = patch.sessionId || null;
     if (f.sessionId && !f.periodAnchor) f.periodAnchor = f.sessionId;
+    // _currentSessionId holds the Firestore doc ID for DB calls (attendance, etc.)
+    // filters.sessionId holds the canonical date string for display and calling/care queries.
     const docId = patch._sessionDocId || f.sessionId;
     AppState._currentSessionId       = docId;
     AppState._currentReportSessionId = docId;
@@ -101,18 +139,46 @@ function dispatchFilters(patch) {
     }
   }
   if (patch.team !== undefined) {
-    const onDevoteesTab = AppState.currentTab === 'devotees';
-    if (AppState.userRole && AppState.userRole !== 'superAdmin' && AppState.userTeam && !onDevoteesTab) {
+    // Team-locked roles cannot change away from their assigned team — EXCEPT on
+    // the Devotees tab, where every admin browses all teams' data. Reports and
+    // logging tabs stay team-scoped for teamAdmin.
+    //
+    // Derive "are we on Devotees?" from the visible DOM panel (not from
+    // AppState.currentTab) — that variable drifts when the user navigates via
+    // browser back, history restore, or any path that toggles .tab-panel.active
+    // without going through switchTab. The drift was the root cause of
+    // coordinators seeing other teams' data on the dashboard.
+    let onDevoteesTab;
+    if (typeof document !== 'undefined') {
+      const activePanel = document.querySelector('.tab-panel.active');
+      onDevoteesTab = activePanel
+        ? activePanel.id === 'tab-devotees'
+        : AppState.currentTab === 'devotees';
+    } else {
+      onDevoteesTab = AppState.currentTab === 'devotees';
+    }
+    // Team-locked unless: super admin, has a cross-team permission flag, or
+    // currently on the Devotees tab (where every admin browses all teams).
+    const unlocked = isSuperAdmin() || canChangeTeamFilter() || onDevoteesTab;
+    if (AppState.userRole && AppState.userTeam && !unlocked) {
       f.team = AppState.userTeam;
     } else {
       f.team = patch.team || '';
     }
   }
-  if (patch.callingBy !== undefined) { f.callingBy = patch.callingBy || ''; }
-  if (patch.period !== undefined)    { f.period = patch.period || 'session'; }
-  if (patch.periodAnchor !== undefined) { f.periodAnchor = patch.periodAnchor || null; }
+  if (patch.callingBy !== undefined) {
+    f.callingBy = patch.callingBy || '';
+  }
+  if (patch.period !== undefined) {
+    f.period = patch.period || 'session';
+  }
+  if (patch.periodAnchor !== undefined) {
+    f.periodAnchor = patch.periodAnchor || null;
+  }
 
-  const changed = ['sessionId','team','callingBy','period','periodAnchor']
+  // Skip the event if nothing actually changed (mirrors from legacy widgets
+  // can fire spuriously).
+  const changed = ['sessionId','dept','team','callingBy','period','periodAnchor']
     .some(k => before[k] !== f[k]);
   if (!changed) return;
 
@@ -121,12 +187,54 @@ function dispatchFilters(patch) {
   } catch (_) {}
 }
 
+// Convenience read helpers — used by tab code.
+function getFilterDept()      { return AppState.filters?.dept      || ''; }
 function getFilterTeam()      { return AppState.filters?.team      || ''; }
 function getFilterCallingBy() { return AppState.filters?.callingBy || ''; }
 function getFilterSessionId() { return AppState.filters?.sessionId || null; }
 
-// ── TEAMS LIST (single source of truth) ───────────────
-const TEAMS = ['Vasudeva','Sankarshan','Pradyumna','Anirudha','Rohini','Rukmini','Kalindi','Satyabhama','Jamvanti','Lakshmana','Kaushal','Bhadra','Other','Other ICF_Prji','Other ICF_Mtg'];
+// ── ROLE / PERMISSION HELPERS ──────────────────────────
+// These are the canonical checks. Use them everywhere instead of raw role
+// equality so the new delegation flags (canAllTeamCalling / canAllTeamReports
+// / canManageAllTeams) automatically apply.
+function isSuperAdmin()         { return AppState.userRole === 'superAdmin'; }
+function isDeptAdmin()          { return AppState.userRole === 'deptAdmin'; }
+function isCoordinator()        { return AppState.userRole === 'teamAdmin'; }
+function isFacilitator()        { return AppState.userRole === 'serviceDevotee'; }
+function isAdminOrCoord()       { return isSuperAdmin() || isDeptAdmin() || isCoordinator(); }
+// canCrossTeamCalling = can submit calling for ANY team (not just their own).
+// True for super admin, anyone with canAllTeamCalling, or canManageAllTeams.
+function canCrossTeamCalling()  { return isSuperAdmin() || isDeptAdmin() || !!AppState.canAllTeamCalling || !!AppState.canManageAllTeams; }
+function canCrossTeamReports()  { return isSuperAdmin() || isDeptAdmin() || !!AppState.canAllTeamReports || !!AppState.canManageAllTeams; }
+function canCrossTeamManage()   { return isSuperAdmin() || !!AppState.canManageAllTeams; }
+// "Can the user freely change the Team filter chip?" — yes if they can see
+// reports for all teams OR manage all teams OR are super admin OR deptAdmin.
+function canChangeTeamFilter()  { return canCrossTeamReports() || canCrossTeamManage() || canCrossTeamCalling(); }
+
+// ── DEPARTMENTS & TEAMS (single source of truth) ──────
+// Departments organise teams. Gender on a devotee auto-assigns department:
+//   Male  → ICF_Prji   |   Female → ICF_Mtg
+// Users (coordinators/admins) choose their dept independently of gender.
+const DEPARTMENTS = {
+  ICF_Prji: ['Vasudeva','Sankarshan','Pradyumna','Anirudha','Panchaal','Other ICF_Prji'],
+  ICF_Mtg:  ['Rohini','Rukmini','Kalindi','Satyabhama','Jamvanti','Lakshmana','Kaushal','Bhadra','Panchaali','Other ICF_Mtg'],
+};
+const TEAMS = Object.values(DEPARTMENTS).flat();
+
+function getDeptForTeam(team) {
+  for (const [dept, teams] of Object.entries(DEPARTMENTS)) {
+    if (teams.includes(team)) return dept;
+  }
+  return '';
+}
+function getTeamsForDept(dept) {
+  return DEPARTMENTS[dept] || [];
+}
+function getDeptForGender(gender) {
+  if (gender === 'Female') return 'ICF_Mtg';
+  if (gender === 'Male')   return 'ICF_Prji';
+  return '';
+}
 
 // ── ATTENDANCE TIME COLOUR ─────────────────────────────
 function attTimeStyle(markedAtISO) {
@@ -156,7 +264,9 @@ function getUpcomingSunday() {
   const sun = new Date(now); sun.setDate(now.getDate() + daysUntilSunday);
   return localDateStr(sun);
 }
-function getCallingWeekDefault() { return getUpcomingSunday(); }
+function getCallingWeekDefault() {
+  return getUpcomingSunday();
+}
 function snapToSunday(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
   const dt = new Date(y, m - 1, d);
@@ -168,6 +278,8 @@ function snapToSunday(dateStr) {
 function initials(name = '') { return name.split(' ').slice(0, 2).map(w => w[0]?.toUpperCase() || '').join(''); }
 function formatDate(iso) {
   if (!iso || typeof iso !== 'string') return '—';
+  // Accept either YYYY-MM-DD or full ISO; reject anything else cleanly so we
+  // never render "Invalid Date" to the user.
   const isYmd = /^\d{4}-\d{2}-\d{2}/.test(iso);
   const d = isYmd ? new Date(iso.slice(0, 10) + 'T00:00:00') : new Date(iso);
   if (!d || isNaN(d.getTime())) return '—';
@@ -176,15 +288,6 @@ function formatDate(iso) {
 function formatBirthday(dob) {
   if (!dob || typeof dob !== 'string') return '';
   const m = dob.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (!m) return '';
-  const mi = parseInt(m[2], 10);
-  const di = parseInt(m[3], 10);
-  if (!mi || !di || mi < 1 || mi > 12) return '';
-  return `${di} ${'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ')[mi - 1]}`;
-}
-function formatAnniversary(dom) {
-  if (!dom || typeof dom !== 'string') return '';
-  const m = dom.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (!m) return '';
   const mi = parseInt(m[2], 10);
   const di = parseInt(m[3], 10);
@@ -206,17 +309,10 @@ function isBirthdayWeek(dob) {
   }
   return false;
 }
-function isAnniversaryWeek(dom) {
-  if (!dom) return false;
-  const now = new Date();
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(now); d.setDate(now.getDate() + i);
-    if (dom.slice(5) === `${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`) return true;
-  }
-  return false;
-}
 
 // ── FORMAT HELPERS ─────────────────────────────────────
+// "Expected to be Serious" is stored verbatim in Firestore for backward
+// compatibility, but we always render it as the short label "ETS".
 function shortStatus(s) {
   if (!s || s === 'Expected to be Serious') return 'ETS';
   return s;
@@ -230,6 +326,37 @@ function statusBadge(s) {
   return `<span class="badge badge-expected">${label}</span>`;
 }
 function teamBadge(t) { return t ? `<span class="badge badge-team">${t}</span>` : ''; }
+
+// Inline tags shown right after a devotee's name across the app:
+//   © circle → has had a completed personal meeting with Prabhuji
+//   "New"    → devotee_status is "New Devotee"
+// Accepts either snake_case (from DevoteeCache) or camelCase (form/state) shapes.
+function nameTags(d) {
+  if (!d) return '';
+  const met    = (d.met_prabhuji === true) || (d.metPrabhuji === true);
+  const status = d.devotee_status || d.devoteeStatus || '';
+  const isNew  = /new/i.test(status);
+  let html = '';
+  if (met)   html += '<span class="met-badge" title="Met Prabhuji">C</span>';
+  if (isNew) html += '<span class="new-tag" title="New devotee">New</span>';
+  return html;
+}
+
+// Calling submission window state. OPEN is MANUAL (Session Config toggle), but
+// it AUTO-CLOSES at 11:59 PM on the calling date (Saturday night). An admin can
+// also close it early by turning the toggle off. Returns true only while the
+// window is effectively open.
+function isCallingWindowOpen(cfg) {
+  if (!cfg || cfg.callingWindowOpen !== true) return false;
+  const cd = cfg.callingDate;
+  if (!cd) return true;                       // manually open, no date to gate against
+  const deadline = new Date(cd + 'T23:59:59'); // Saturday 11:59 PM local
+  return new Date() <= deadline;
+}
+// contactIcons(mobile) → direct call/whatsapp links (single number).
+// contactIcons(mobile, { altMobile, devoteeId, name }) → if altMobile is also
+// present, the icons instead open the number-picker modal so the user can
+// choose which number (and can promote the alt to primary).
 function contactIcons(mobile, opts) {
   const altMobile = (opts && opts.altMobile) || '';
   const devoteeId = (opts && opts.devoteeId) || '';
@@ -238,6 +365,7 @@ function contactIcons(mobile, opts) {
   const alt       = (altMobile || '').replace(/\D/g, '');
   if (!primary && !alt) return '';
 
+  // Only one number available → direct links (original behaviour)
   if (!primary || !alt) {
     const c  = primary || alt;
     const wa = c.length === 10 ? '91' + c : c;
@@ -247,6 +375,7 @@ function contactIcons(mobile, opts) {
     </div>`;
   }
 
+  // Both numbers present → open the chooser modal
   const sName = name.replace(/'/g, "\\'");
   return `<div class="contact-icons">
     <button class="contact-icon icon-phone" onclick="event.stopPropagation(); openNumberPicker('${devoteeId}','${sName}','${primary}','${alt}')" title="Call"><i class="fas fa-phone-alt"></i><span class="contact-dual">2</span></button>
@@ -254,6 +383,9 @@ function contactIcons(mobile, opts) {
   </div>`;
 }
 
+// Number-picker modal — lets user call/WhatsApp either number AND optionally
+// promote the alt to primary. Anyone (caller / coordinator / super admin) can
+// swap if they have edit rights; the swap just toggles the two fields in Firestore.
 function openNumberPicker(devoteeId, name, mobile, altMobile) {
   const c = document.getElementById('np-content');
   if (!c) return;
@@ -297,6 +429,7 @@ async function makePrimaryNumber() {
     DevoteeCache.bust();
     closeModal('number-picker-modal');
     showToast('Primary number updated!', 'success');
+    // Refresh whichever view is current
     if (typeof loadDevotees === 'function'        && AppState.currentTab === 'devotees')     loadDevotees();
     if (typeof loadCallingStatus === 'function'   && AppState.currentTab === 'calling')      loadCallingStatus();
     if (typeof loadCallingMgmtTab === 'function'  && AppState.currentTab === 'calling-mgmt') loadCallingMgmtTab();
@@ -317,6 +450,8 @@ function showToast(msg, type = '') {
 function debounce(fn, ms) {
   let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
 }
+// Back-button support: keep one history entry while any overlay is open.
+// When the user taps Back, close every open overlay at once.
 let _overlayHistoryPushed = false;
 function _ensureOverlayHistory() {
   if (!_overlayHistoryPushed) {
@@ -351,21 +486,45 @@ window.addEventListener('popstate', () => {
     _exitCMSelectMode?.(); closedAny = true;
   }
   _overlayHistoryPushed = false;
+  // If nothing was closed, let the browser actually navigate back next time
 });
 
-// ── DEVOTEE CACHE (90-second TTL) ────────────────────
+// ── DEVOTEE CACHE (5-minute TTL) ─────────────────────
+// Writes call DevoteeCache.bust() so edits show up instantly. The TTL only
+// controls passive refreshes, and the devotee list changes only a few times
+// per day — 5 min avoids re-fetching on every casual tab switch.
+//
+// bust() ALSO invalidates dependent caches (dashboard, care, calling-mgmt)
+// because all three derive their aggregates from devotee data. Without this
+// chain, a devotee edit would leave the dashboard showing stale numbers
+// until the user manually refreshed.
 const DevoteeCache = {
-  raw: [], stamp: 0, TTL: 90000,
+  raw: [], stamp: 0, TTL: 300000,
+  _inflight: null,   // deduplicates concurrent refresh calls → 1 Firestore read
   async refresh() {
-    const snap = await fdb.collection('devotees').where('isActive', '==', true).get();
-    this.raw = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    this.raw.sort((a, b) => a.name.localeCompare(b.name));
-    this.stamp = Date.now();
-    return this.raw;
+    if (this._inflight) return this._inflight;
+    this._inflight = (async () => {
+      try {
+        const snap = await fdb.collection('devotees').where('isActive', '==', true).get();
+        this.raw = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        this.raw.sort((a, b) => a.name.localeCompare(b.name));
+        this.stamp = Date.now();
+        return this.raw;
+      } finally {
+        this._inflight = null;
+      }
+    })();
+    return this._inflight;
   },
   async all(force = false) {
     if (force || Date.now() - this.stamp > this.TTL) return this.refresh();
     return this.raw;
   },
-  bust() { this.stamp = 0; }
+  bust() {
+    this.stamp = 0;
+    this._inflight = null;
+    if (typeof _bustDashboardCache === 'function') _bustDashboardCache();
+    if (typeof _bustCareCache      === 'function') _bustCareCache();
+    if (typeof _bustCMCache        === 'function') _bustCMCache();
+  }
 };
