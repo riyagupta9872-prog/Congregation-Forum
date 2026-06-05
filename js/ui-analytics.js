@@ -772,7 +772,13 @@ async function loadCareData() {
 function _careRender() {
   if (!_careRawCache) return;
   const team = getFilterTeam();
-  const tf = list => team ? list.filter(d => (d.team_name || d.teamName) === team) : list;
+  const dept = (typeof getFilterDept === 'function') ? getFilterDept() : '';
+  const deptTeams = (dept && typeof getTeamsForDept === 'function') ? getTeamsForDept(dept) : [];
+  const tf = list => {
+    if (team) return list.filter(d => (d.team_name || d.teamName) === team);
+    if (deptTeams.length) return list.filter(d => deptTeams.includes(d.team_name || d.teamName));
+    return list;
+  };
 
   const w1 = tf(_careRawCache.absentWeek);
   const w2 = tf(_careRawCache.absent2Weeks);

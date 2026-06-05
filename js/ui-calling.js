@@ -531,12 +531,16 @@ function renderCallingStats(devotees) {
 function filterCallingList() {
   const q    = document.getElementById('calling-search')?.value.toLowerCase() || '';
   const s    = document.getElementById('calling-filter-status')?.value || '';
-  // Team + Calling By come from the master filter bar.
+  // Team + Calling By + Dept come from the master filter bar.
   const team = (typeof getFilterTeam      === 'function') ? getFilterTeam()      : '';
   const by   = (typeof getFilterCallingBy === 'function') ? getFilterCallingBy() : '';
+  const dept = (typeof getFilterDept      === 'function') ? getFilterDept()      : '';
+  const deptTeams = (dept && typeof getTeamsForDept === 'function') ? getTeamsForDept(dept) : [];
   const filtered = AppState.callingData.filter(d => {
     if (q    && !d.name.toLowerCase().includes(q) && !(d.mobile||'').includes(q)) return false;
     if (team && d.team_name !== team) return false;
+    // If no team is selected but a dept is, restrict to that dept's teams.
+    if (!team && deptTeams.length && !deptTeams.includes(d.team_name)) return false;
     if (by   && d.calling_by !== by) return false;
     if (s) {
       if (s === '_none') return !d.coming_status && !d.calling_reason && !d.calling_notes;
@@ -1966,7 +1970,13 @@ function _tcRenderTeamGrid() {
   });
 
   const weekLabel = new Date(weekDate + 'T00:00:00').toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' });
-  const teamOrder = (typeof TEAMS !== 'undefined') ? TEAMS : Object.keys(teamStats);
+  const _tcDept = (typeof getFilterDept === 'function') ? getFilterDept() : '';
+  const _tcDeptTeams = (_tcDept && typeof getTeamsForDept === 'function') ? getTeamsForDept(_tcDept) : null;
+  const teamOrder = (() => {
+    const base = (typeof TEAMS !== 'undefined') ? TEAMS : Object.keys(teamStats);
+    if (_tcDeptTeams) return base.filter(t => _tcDeptTeams.includes(t));
+    return base;
+  })();
   const totalDevotees = allDevotees.length;
   const totalCallers = new Set(allDevotees.map(d => d.calling_by).filter(Boolean)).size;
 

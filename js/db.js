@@ -492,6 +492,15 @@ const DB = {
       const s = search.toLowerCase();
       list = list.filter(d => d.name.toLowerCase().includes(s) || (d.mobile || '').includes(s));
     }
+    // Apply master filter bar team/dept so attendance candidates respect scope.
+    const _attTeam = AppState.filters?.team || '';
+    const _attDept = AppState.filters?.dept || '';
+    if (_attTeam) {
+      list = list.filter(d => d.teamName === _attTeam);
+    } else if (_attDept) {
+      const _attDeptTeams = getTeamsForDept(_attDept);
+      list = list.filter(d => _attDeptTeams.includes(d.teamName) || d.department === _attDept);
+    }
     return list.map(d => ({
       ...toSnake(d),
       coming_status: csMap[d.id]?.comingStatus || null,
@@ -854,9 +863,21 @@ const DB = {
       }
       return !!(d.callingBy && d.callingBy.trim());
     });
-    // teamAdmin sees only their own team; superAdmin sees all
+    // Role-based scope: teamAdmin → own team; deptAdmin → own dept; superAdmin → all
     if (AppState.userRole === 'teamAdmin' && AppState.userTeam) {
       filtered = filtered.filter(d => d.teamName === AppState.userTeam);
+    } else if (typeof isDeptAdmin === 'function' && isDeptAdmin() && AppState.userDept) {
+      const _dtTeams = getTeamsForDept(AppState.userDept);
+      filtered = filtered.filter(d => _dtTeams.includes(d.teamName) || d.department === AppState.userDept);
+    }
+    // Also honour master filter bar team/dept selection
+    const _tcTeam = AppState.filters?.team || '';
+    const _tcDept = AppState.filters?.dept || '';
+    if (_tcTeam) {
+      filtered = filtered.filter(d => d.teamName === _tcTeam);
+    } else if (_tcDept && AppState.userRole === 'superAdmin') {
+      const _tcDeptTeams = getTeamsForDept(_tcDept);
+      filtered = filtered.filter(d => _tcDeptTeams.includes(d.teamName) || d.department === _tcDept);
     }
     const devotees = filtered.map(d => ({
       ...toSnake(d),
