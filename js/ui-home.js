@@ -328,11 +328,11 @@ async function renderHomeLeaderboard() {
           _lbByDept[d].push(team);
         });
         const _lbSubtotalRow = (dept) => {
-          const canonTeams = (typeof DEPARTMENTS !== 'undefined' && DEPARTMENTS[dept]) ? DEPARTMENTS[dept] : (_lbByDept[dept] || []);
+          const deptTeamSet = new Set(_lbByDept[dept] || []);
           let deptTotal = 0;
           const cells = sessions.map(sess => {
             const presentSet = attMap[sess.id] || new Set();
-            const n = [...presentSet].filter(id => canonTeams.includes(devTeamMap[id])).length;
+            const n = [...presentSet].filter(id => deptTeamSet.has(devTeamMap[id])).length;
             deptTotal += n;
             const nc = n >= 13 ? '#16a34a' : n >= 10 ? '#d97706' : '#dc2626';
             return `<td class="lb-td lb-total-td" style="color:${nc}"><strong>${n}</strong></td>`;

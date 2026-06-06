@@ -4215,7 +4215,8 @@ button.fab:hover { transform: scale(1.1) rotate(90deg); box-shadow: 0 8px 28px r
 
 /* ══ USER ACTION MODAL — built on design system primitives ═════════════ */
 .ua {
-  max-width: 560px; width: 95%;
+  max-width: 820px; width: 96%;
+  min-height: 560px;
   padding: 0;
   border-radius: var(--r-lg);
   overflow: hidden;
@@ -4226,8 +4227,8 @@ button.fab:hover { transform: scale(1.1) rotate(90deg); box-shadow: 0 8px 28px r
 .ua__body {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  flex: 1 1 0;
-  min-height: 0;
+  flex: 1 1 auto;
+  min-height: 320px;
   padding: var(--s-4) var(--s-5);
   padding-bottom: var(--s-6);
 }
@@ -6500,7 +6501,7 @@ thead th {
   .um-row .um-meta   { white-space: normal; word-break: break-word; }
   .um-section-head { font-size: .76rem; padding: .45rem .15rem .3rem; }
   /* User-action modal: give it the full bottom-sheet height */
-  #user-action-modal .modal-box { max-height: 94dvh; }
+  #user-action-modal .modal-box { max-height: 96dvh; }
 }
 
 /* ════ HOME LEADERBOARD ════════════════════════════════════════════════════ */
