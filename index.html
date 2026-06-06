@@ -1046,9 +1046,9 @@
             <input type="date" id="f-dob">
           </div>
           <div class="form-group">
-            <label>Gender</label>
+            <label>Gender <span class="req">*</span></label>
             <select id="f-gender" onchange="_onGenderChange(this.value)">
-              <option value="">Not specified</option>
+              <option value="">Select Gender</option>
               <option value="Male">Male</option>
               <option value="Female">Female</option>
               <option value="Other">Other</option>
@@ -1220,6 +1220,14 @@
           <span class="psec-note">Team assignment and connections</span>
         </div>
         <div class="form-grid">
+          <div class="form-group">
+            <label>Department <span class="req">*</span></label>
+            <select id="f-dept" onchange="_onDeptChange(this.value)">
+              <option value="">Select Department</option>
+              <option value="ICF_Prji">ICF_Prji (Prabhuji)</option>
+              <option value="ICF_Mtg">ICF_Mtg (Mataji)</option>
+            </select>
+          </div>
           <div class="form-group">
             <label>Team Name</label>
             <select id="f-team" onchange="_onTeamChange(this.value)">
@@ -1801,6 +1809,13 @@
           <input type="date" id="clear-date-input" class="filter-select" style="flex:1">
           <button class="btn btn-danger" onclick="clearDataForDate()"><i class="fas fa-trash"></i> Clear</button>
         </div>
+      </div>
+
+      <!-- Backfill Department -->
+      <div class="clear-option-card" style="border-color:var(--color-primary)">
+        <div class="clear-option-title" style="color:var(--color-primary)"><i class="fas fa-layer-group"></i> Backfill Department on Existing Devotees</div>
+        <p class="clear-option-desc">Sets the <strong>Department</strong> field on all existing devotees based on their Team and Gender. Safe to run multiple times — skips devotees already set. Run this once after migration.</p>
+        <button class="btn btn-primary" style="margin-top:.5rem" onclick="runDeptBackfill()"><i class="fas fa-magic"></i> Backfill Department</button>
       </div>
 
       <!-- Option 2: Clear by Team + Date -->
@@ -2486,7 +2501,6 @@
         <select id="li-level" class="form-control" style="margin-top:.3rem">
           <option value="1">Level 1 — HG Ram Atirapriya Prabhuji</option>
           <option value="2">Level 2 — HG Sulakshana Sita Mataji</option>
-          <option value="3">Level 3 — Naveena (Senior)</option>
           <option value="4" selected>Level 4 — Team Coordinator</option>
         </select>
       </div>

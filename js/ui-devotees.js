@@ -479,6 +479,7 @@ function clearDevoteeForm() {
   document.getElementById('f-chanting').value = '0';
   // New devotees default to team "Other" and status "New Devotee" — super admin
   // can re-assign later from the Calling Mgmt → New Comers tab.
+  const fDeptClear = document.getElementById('f-dept'); if (fDeptClear) { fDeptClear.value = ''; _onDeptChange(''); }
   document.getElementById('f-team').value = 'Other';
   document.getElementById('f-status').value = 'New Devotee';
   document.getElementById('f-kanthi').value = '0';
@@ -501,6 +502,8 @@ function clearDevoteeForm() {
   // pre-filled instead of "Other".
   if ((AppState.userRole === 'teamAdmin' || AppState.userRole === 'serviceDevotee') && AppState.userTeam) {
     document.getElementById('f-team').value = AppState.userTeam;
+    const fDeptRole = document.getElementById('f-dept');
+    if (fDeptRole && typeof getDeptForTeam === 'function') fDeptRole.value = getDeptForTeam(AppState.userTeam) || '';
   }
 }
 
@@ -519,6 +522,8 @@ async function populateEditForm(id) {
     document.getElementById('f-joining').value  = d.date_of_joining || '';
     document.getElementById('f-chanting').value = d.chanting_rounds || 0;
     document.getElementById('f-team').value     = d.team_name || '';
+    const fDeptEdit = document.getElementById('f-dept');
+    if (fDeptEdit && typeof getDeptForTeam === 'function') { fDeptEdit.value = getDeptForTeam(d.team_name || '') || d.department || ''; _onDeptChange(fDeptEdit.value, /*keepTeam=*/true); }
     document.getElementById('f-status').value   = d.devotee_status || 'Expected to be Serious';
     document.getElementById('f-kanthi').value   = d.kanthi || 0;
     document.getElementById('f-gopi').value     = d.vaishnav_dress || 0;
@@ -560,24 +565,39 @@ async function populateEditForm(id) {
 }
 
 function _onGenderChange(val) {
-  // Auto-suggest team from gender-based department — update team dropdown's first selection
-  // but don't override an already-set team.
-  const teamEl = document.getElementById('f-team');
-  if (teamEl && !teamEl.value) {
+  const fDept = document.getElementById('f-dept');
+  if (fDept && !fDept.value && typeof getDeptForGender === 'function') {
     const dept = getDeptForGender(val);
-    if (dept && DEPARTMENTS[dept]?.length) {
-      // pre-select first team of dept as a hint only if blank
-      // leave blank to avoid forcing assignment
-    }
+    if (dept) { fDept.value = dept; _onDeptChange(dept, /*keepTeam=*/true); }
   }
 }
 window._onGenderChange = _onGenderChange;
 
 function _onTeamChange(val) {
-  // When team is selected, optionally auto-set gender field hint based on dept
-  // (just a UX hint — user can override gender freely)
+  const fDept = document.getElementById('f-dept');
+  if (fDept && typeof getDeptForTeam === 'function') {
+    const dept = getDeptForTeam(val);
+    if (dept) fDept.value = dept;
+  }
 }
 window._onTeamChange = _onTeamChange;
+
+function _onDeptChange(val, keepTeam) {
+  const teamEl = document.getElementById('f-team');
+  if (!teamEl) return;
+  const optgroups = teamEl.querySelectorAll('optgroup');
+  optgroups.forEach(og => {
+    const show = !val || og.label === val;
+    og.style.display = show ? '' : 'none';
+    Array.from(og.options).forEach(o => o.disabled = !show);
+  });
+  // If current team belongs to a different dept, reset team
+  if (!keepTeam && val && typeof getDeptForTeam === 'function') {
+    const curTeam = teamEl.value;
+    if (curTeam && getDeptForTeam(curTeam) !== val) teamEl.value = '';
+  }
+}
+window._onDeptChange = _onDeptChange;
 
 function getFormPayload() {
   const gender = document.getElementById('f-gender')?.value || '';
@@ -590,7 +610,7 @@ function getFormPayload() {
     dob:               document.getElementById('f-dob').value,
     gender:            gender,
     marriage_anniversary: document.getElementById('f-anniversary')?.value || '',
-    department:        getDeptForGender(gender) || getDeptForTeam(teamName) || '',
+    department:        document.getElementById('f-dept')?.value || getDeptForTeam(teamName) || getDeptForGender(gender) || '',
     date_of_joining:   document.getElementById('f-joining').value,
     chanting_rounds:   parseInt(document.getElementById('f-chanting').value) || 0,
     team_name:         teamName,
@@ -630,11 +650,23 @@ async function saveDevotee(e) {
   const payload = getFormPayload();
   if (_pendingDevoteePhoto !== undefined) payload.profile_pic = _pendingDevoteePhoto;
 
-  // Required fields: Name + Mobile + Reference By only.
+  // Required fields: Name + Mobile + Gender + Department + Reference By.
   if (!payload.name) {
     switchProfileTab('identity', null);
     showToast('Name is required', 'error');
     setTimeout(() => document.getElementById('f-name')?.focus(), 100);
+    return;
+  }
+  if (!payload.gender) {
+    switchProfileTab('identity', null);
+    showToast('Gender is required', 'error');
+    setTimeout(() => document.getElementById('f-gender')?.focus(), 100);
+    return;
+  }
+  if (!payload.department) {
+    switchProfileTab('team', null);
+    showToast('Department is required', 'error');
+    setTimeout(() => document.getElementById('f-dept')?.focus(), 100);
     return;
   }
   if (!payload.reference_by) {

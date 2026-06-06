@@ -235,6 +235,34 @@ function getDeptForGender(gender) {
   if (gender === 'Male')   return 'ICF_Prji';
   return '';
 }
+// Returns true if a devotee (camelCase Firestore doc) belongs to a department.
+// Checks three paths so any one is sufficient:
+//   1. teamName is in the dept's team list (team → dept)
+//   2. stored department field matches (explicit assignment)
+//   3. gender maps to that dept (Male → ICF_Prji, Female → ICF_Mtg)
+function matchesDept(d, dept) {
+  if (!dept) return true;
+  if (getTeamsForDept(dept).includes(d.teamName)) return true;
+  if (d.department === dept) return true;
+  if (getDeptForGender(d.gender) === dept) return true;
+  return false;
+}
+
+// ── DEPT REPORT HELPERS ────────────────────────────────
+// Returns `teams` reordered to match the canonical DEPARTMENTS sequence.
+// Teams not found in any dept are appended at the end.
+function sortTeamsByDept(teams) {
+  const ordered = [];
+  for (const deptTeams of Object.values(DEPARTMENTS)) {
+    deptTeams.forEach(t => { if (teams.includes(t)) ordered.push(t); });
+  }
+  teams.forEach(t => { if (!ordered.includes(t)) ordered.push(t); });
+  return ordered;
+}
+// Returns a full-width <tr> that labels a department section in report tables.
+function deptGroupHeaderHTML(colspan, deptName) {
+  return `<tr><td colspan="${colspan}" style="background:#0d2d5a;color:#fff;font-weight:700;font-size:.78rem;text-align:center;padding:.35rem .75rem;letter-spacing:.06em;text-transform:uppercase">${deptName}</td></tr>`;
+}
 
 // ── ATTENDANCE TIME COLOUR ─────────────────────────────
 function attTimeStyle(markedAtISO) {

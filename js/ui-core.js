@@ -1412,6 +1412,24 @@ async function purgeMigratedUserDoc(uid) {
   }
 }
 
+// ── DEPT BACKFILL ─────────────────────────────────────
+window.runDeptBackfill = async function() {
+  try {
+    showToast('Backfilling department field…', 'info');
+    const { count, alreadyDone } = await DB.backfillDepartmentOnce();
+    DevoteeCache.bust();
+    if (alreadyDone) {
+      showToast('Already done — all devotees have a department set.', 'success');
+    } else {
+      showToast(`Done! Department set on ${count} devotee${count !== 1 ? 's' : ''}.`, 'success');
+      if (typeof loadDevotees === 'function') loadDevotees();
+    }
+  } catch (e) {
+    showToast('Backfill failed: ' + (e.message || 'Check connection'), 'error');
+    console.error('runDeptBackfill', e);
+  }
+};
+
 // ── CLEAR DATA ────────────────────────────────────────
 async function openClearDataModal() {
   const sel = document.getElementById('clear-team-select');

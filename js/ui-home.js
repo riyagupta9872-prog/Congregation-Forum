@@ -99,9 +99,10 @@ async function _getCoordPics() {
 async function renderHomeLeaderboard() {
   if (_lbInFlight) return;
   const filterSession = (typeof getFilterSessionId === 'function') ? getFilterSessionId() : '';
-  const renderKey = filterSession || 'latest';
+  const _lbDept = (typeof getFilterDept === 'function') ? getFilterDept() : '';
+  const renderKey = `${filterSession || 'latest'}:${_lbDept}`;
   const now = Date.now();
-  // Skip only when same session AND rendered recently (within TTL)
+  // Skip only when same session+dept AND rendered recently (within TTL)
   if (renderKey === _lbLastKey && now - _lbLastRenderTime < _LB_TTL) return;
   _lbInFlight = true;
   _lbLastKey  = renderKey;
@@ -154,8 +155,13 @@ async function renderHomeLeaderboard() {
       if (attMap[sessionId]) attMap[sessionId].add(devoteeId);
     });
 
-    // ── All teams — leaderboard is never filtered by team ──
-    const inCalling = allDevotees.filter(d =>
+    // Filter by active dept (team filter intentionally ignored on leaderboard)
+    const _lbDeptTeams = _lbDept && typeof getTeamsForDept === 'function' ? getTeamsForDept(_lbDept) : null;
+    const scopedDevotees = _lbDeptTeams
+      ? allDevotees.filter(d => _lbDeptTeams.includes(d.teamName))
+      : allDevotees;
+
+    const inCalling = scopedDevotees.filter(d =>
       d.isActive !== false && !d.isNotInterested &&
       d.callingMode !== 'not_interested' && d.callingMode !== 'online' &&
       d.callingBy && d.callingBy.trim()
@@ -166,7 +172,7 @@ async function renderHomeLeaderboard() {
     const latestSess = sessions[sessions.length - 1];
     const latestPresent = attMap[latestSess.id] || new Set();
 
-    const teamsSet = new Set(allDevotees.map(d => d.teamName).filter(Boolean));
+    const teamsSet = new Set(scopedDevotees.map(d => d.teamName).filter(Boolean));
     const teams = [...teamsSet].sort();
     const teamIdx = {};
     teams.forEach((t, i) => { teamIdx[t] = i; });
@@ -178,7 +184,9 @@ async function renderHomeLeaderboard() {
       const t = devTeamMap[devId];
       if (t && teamCame[t] !== undefined) teamCame[t]++;
     });
-    const totalCame = [...latestPresent].length;
+    const totalCame = _lbDeptTeams
+      ? [...latestPresent].filter(id => _lbDeptTeams.includes(devTeamMap[id])).length
+      : [...latestPresent].length;
 
     // Update header label — shows "Sun, 31 May 2026" (the anchor session)
     const lbLabel = document.getElementById('lb-session-label');
@@ -288,7 +296,7 @@ async function renderHomeLeaderboard() {
         return `<th>${d.toLocaleDateString('en-IN',{day:'numeric',month:'short'})}</th>`;
       }).join('');
 
-      const tableRows = sorted.map((team, rank) => {
+      const _lbMkRow = (team, rank) => {
         const color = _teamColor(teamIdx[team] || 0);
         const sName = team.replace(/'/g, "\\'");
         let totalCame = 0;
@@ -299,21 +307,34 @@ async function renderHomeLeaderboard() {
           const numColor = came >= 13 ? '#16a34a' : came >= 10 ? '#d97706' : '#dc2626';
           return `<td class="lb-td" style="color:${numColor};font-weight:700">${came}</td>`;
         }).join('');
-
-        // Avg = total came across sessions ÷ number of sessions
         const avg = sessions.length ? Math.round(totalCame / sessions.length) : 0;
         const avgColor = avg >= 15 ? '#16a34a' : avg >= 8 ? '#b45309' : '#dc2626';
-
         const medal = rank === 0 ? '🥇' : rank === 1 ? '🥈' : rank === 2 ? '🥉' : '';
         return `<tr class="lb-tr" onclick="_lbOpenTeam('${sName}')">
           <td class="lb-sno-cell">${rank + 1}</td>
-          <td class="lb-team-cell" style="border-left:3px solid ${color}">
-            ${medal} ${team}
-          </td>
+          <td class="lb-team-cell" style="border-left:3px solid ${color}">${medal} ${team}</td>
           ${cells}
           <td class="lb-td lb-avg-td" style="color:${avgColor};font-weight:800;background:#f9f6ee">${avg}</td>
         </tr>`;
-      }).join('');
+      };
+      let tableRows;
+      if (_lbDept || typeof getDeptForTeam !== 'function' || typeof DEPARTMENTS === 'undefined') {
+        tableRows = sorted.map((team, rank) => _lbMkRow(team, rank)).join('');
+      } else {
+        const _lbByDept = {};
+        sorted.forEach(team => {
+          const d = getDeptForTeam(team) || '—';
+          if (!_lbByDept[d]) _lbByDept[d] = [];
+          _lbByDept[d].push(team);
+        });
+        const _lbParts = [];
+        const _lbSpan = sessions.length + 3;
+        Object.keys(DEPARTMENTS).filter(d => _lbByDept[d]?.length).forEach(dept => {
+          _lbParts.push(deptGroupHeaderHTML(_lbSpan, dept));
+          _lbByDept[dept].forEach((team, ri) => _lbParts.push(_lbMkRow(team, ri)));
+        });
+        tableRows = _lbParts.join('');
+      }
 
       // Total row
       const totalCells = sessions.map(sess => {

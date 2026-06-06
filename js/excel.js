@@ -193,6 +193,10 @@ async function exportCallingList() {
     const coordStyle = { ...XS.cell({ left:true }), font: { sz:9, color:{rgb:'444444'} } };
 
     const wb = XLSX.utils.book_new();
+    const _clDeptAccum = {};
+    if (typeof DEPARTMENTS !== 'undefined') {
+      Object.keys(DEPARTMENTS).forEach(d => { _clDeptAccum[d] = { rows: [], merges: [], colWidths: null }; });
+    }
 
     TEAMS.forEach(team => {
       const members = activeDevotees.filter(d => d.teamName === team);
@@ -247,6 +251,25 @@ async function exportCallingList() {
       ws['!rows'] = [{ hpt:18 }, { hpt:42 }];
       ws['!views'] = [{ state:'frozen', xSplit:8, ySplit:2, topLeftCell:'I3' }];
       XLSX.utils.book_append_sheet(wb, ws, team.slice(0,31));
+
+      // Accumulate into dept sheet
+      const _clDept = typeof getDeptForTeam === 'function' ? getDeptForTeam(team) : null;
+      if (_clDept && _clDeptAccum[_clDept]) {
+        const acc = _clDeptAccum[_clDept];
+        const rowOff = acc.rows.length;
+        acc.rows.push(...sheetData);
+        if (!acc.colWidths) acc.colWidths = colWidths;
+        acc.merges.push({ s:{r:rowOff,c:0}, e:{r:rowOff,c:totalCols-1} });
+      }
+    });
+
+    // Append dept summary sheets (ICF_Prji / ICF_Mtg)
+    Object.entries(_clDeptAccum).forEach(([dept, acc]) => {
+      if (!acc.rows.length) return;
+      const dws = _xlsSheet(acc.rows, acc.colWidths);
+      dws['!merges'] = acc.merges;
+      dws['!views'] = [{ state:'frozen', xSplit:8, ySplit:0, topLeftCell:'I1' }];
+      XLSX.utils.book_append_sheet(wb, dws, dept.slice(0,31));
     });
 
     const niHdrs = ['#','Name','Mobile','Ref','CR','Team','Calling By','Date of Joining','Moved Not Interested On','Lifetime Att'].map(h=>({v:h,s:XS.hdr('7B3F00','FFFFFF')}));
@@ -373,6 +396,10 @@ async function exportCallingListByCoord() {
 
     const wb = XLSX.utils.book_new();
     const fixedLabels = ['Sno.', 'Name', 'Mobile Number', 'Ref-2', 'C.R', 'Active', 'Team Wise', 'Calling By', `Attendance\n${fyLabel}`];
+    const _cbcDeptAccum = {};
+    if (typeof DEPARTMENTS !== 'undefined') {
+      Object.keys(DEPARTMENTS).forEach(d => { _cbcDeptAccum[d] = { rows: [], merges: [], colWidths: null }; });
+    }
 
     Object.keys(byCoord).sort().forEach(coordName => {
       const members = [...byCoord[coordName]].sort((a, b) => a.name.localeCompare(b.name));
@@ -451,6 +478,28 @@ async function exportCallingListByCoord() {
       ws['!rows'] = [{ hpt: 18 }, { hpt: 30 }];
       ws['!views'] = [{ state: 'frozen', xSplit: 9, ySplit: 2, topLeftCell: 'J3' }];
       XLSX.utils.book_append_sheet(wb, ws, coordName.slice(0, 31));
+
+      // Accumulate into dept sheet
+      const _cbcDept = typeof getDeptForTeam === 'function' ? getDeptForTeam(members[0]?.teamName || '') : null;
+      if (_cbcDept && _cbcDeptAccum[_cbcDept]) {
+        const acc = _cbcDeptAccum[_cbcDept];
+        const rowOff = acc.rows.length;
+        acc.rows.push(...[titleRow, hdrRow, ...dataRows]);
+        if (!acc.colWidths) acc.colWidths = [
+          { wch: 4 }, { wch: 22 }, { wch: 13 }, { wch: 18 }, { wch: 4 }, { wch: 10 }, { wch: 14 }, { wch: 18 }, { wch: 12 },
+          ...weekPairs.flatMap(() => [{ wch: 22 }, { wch: 5 }]), { wch: 6 }
+        ];
+        acc.merges.push({ s: { r: rowOff, c: 0 }, e: { r: rowOff, c: totalCols - 1 } });
+      }
+    });
+
+    // Append dept summary sheets
+    Object.entries(_cbcDeptAccum).forEach(([dept, acc]) => {
+      if (!acc.rows.length) return;
+      const dws = _xlsSheet(acc.rows, acc.colWidths);
+      dws['!merges'] = acc.merges;
+      dws['!views'] = [{ state: 'frozen', xSplit: 9, ySplit: 0, topLeftCell: 'J1' }];
+      XLSX.utils.book_append_sheet(wb, dws, dept.slice(0, 31));
     });
 
     const coordCount = Object.keys(byCoord).length;
@@ -479,10 +528,26 @@ async function exportSheetExcel() {
       d.teamName || '', d.callingBy || '', d.lifetimeAttendance || 0,
     ]);
 
+    const rosterCols = [{ wch: 5 }, { wch: 26 }, { wch: 13 }, { wch: 20 }, { wch: 5 }, { wch: 8 }, { wch: 14 }, { wch: 20 }, { wch: 10 }];
     const ws = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
-    ws['!cols'] = [{ wch: 5 }, { wch: 26 }, { wch: 13 }, { wch: 20 }, { wch: 5 }, { wch: 8 }, { wch: 14 }, { wch: 20 }, { wch: 10 }];
+    ws['!cols'] = rosterCols;
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Devotee Roster');
+    // Dept sheets
+    if (typeof DEPARTMENTS !== 'undefined') {
+      Object.entries(DEPARTMENTS).forEach(([dept, deptTeams]) => {
+        const dRows = rows.filter(d => deptTeams.includes(d.teamName));
+        if (!dRows.length) return;
+        const dDataRows = dRows.map((d, i) => [
+          i + 1, d.name, d.mobile || '', d.referenceBy || '',
+          d.chantingRounds || 0, d.isActive !== false ? 'Active' : '',
+          d.teamName || '', d.callingBy || '', d.lifetimeAttendance || 0,
+        ]);
+        const dws = XLSX.utils.aoa_to_sheet([headerRow, ...dDataRows]);
+        dws['!cols'] = rosterCols;
+        XLSX.utils.book_append_sheet(wb, dws, dept.slice(0, 31));
+      });
+    }
     XLSX.writeFile(wb, 'Devotee_Roster.xlsx');
     showToast('Roster downloaded!', 'success');
   } catch (e) { console.error(e); showToast('Export failed', 'error'); }
@@ -530,6 +595,24 @@ async function exportYearlySheetExcel() {
     const ws = XLSX.utils.aoa_to_sheet([headerRow1, headerRow2, ...dataRows]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Yearly Sheet');
+    // Dept sheets
+    if (typeof DEPARTMENTS !== 'undefined') {
+      Object.entries(DEPARTMENTS).forEach(([dept, deptTeams]) => {
+        const dDevotees = rows.filter(d => deptTeams.includes(d.teamName));
+        if (!dDevotees.length) return;
+        const dDataRows = dDevotees.map((d, i) => {
+          const base = [i + 1, d.name, d.mobile || '', d.referenceBy || '', d.chantingRounds || 0, d.isActive !== false ? 'Active' : '', d.teamName || '', d.callingBy || ''];
+          sessions.forEach(s => {
+            if (s.isCancelled) { base.push('—', '—'); return; }
+            base.push(csLabel(csMap[s.sessionDate]?.[d.id] || null), attMap[s.id]?.has(d.id) ? 'P' : '');
+          });
+          base.push(d.lifetimeAttendance || 0);
+          return base;
+        });
+        const dws = XLSX.utils.aoa_to_sheet([headerRow1, headerRow2, ...dDataRows]);
+        XLSX.utils.book_append_sheet(wb, dws, dept.slice(0, 31));
+      });
+    }
     const yearLabel = start.slice(0, 4);
     XLSX.writeFile(wb, `Yearly_Sheet_FY${yearLabel}.xlsx`);
     showToast('Excel downloaded!', 'success');
@@ -861,7 +944,7 @@ async function _buildAndDownloadDevoteeWorkbook({ devotees, includeTeamCol, file
       return;
     }
 
-    // ── EXPORT MODE: Per-team sheets + All Teams + Re-Import (Flat)
+    // ── EXPORT MODE: Per-team sheets + Dept sheets + All Teams + Re-Import (Flat)
     TEAMS.forEach(team => {
       const teamDevotees = devotees.filter(d => d.teamName === team && d.isActive !== false);
       if (!teamDevotees.length) return;
@@ -872,6 +955,27 @@ async function _buildAndDownloadDevoteeWorkbook({ devotees, includeTeamCol, file
       ws['!rows']   = rows.map(() => ({ hpt: 18 }));
       XLSX.utils.book_append_sheet(wb, ws, team.slice(0, 31));
     });
+
+    // Dept sheets (ICF_Prji / ICF_Mtg) — each combines all teams in the dept
+    if (typeof DEPARTMENTS !== 'undefined') {
+      Object.entries(DEPARTMENTS).forEach(([dept, deptTeams]) => {
+        const rows = [], merges = [];
+        deptTeams.forEach(team => {
+          const teamDevotees = devotees.filter(d => d.teamName === team && d.isActive !== false);
+          if (!teamDevotees.length) return;
+          const banner = Array.from({ length: TOTAL_COLS }, (_, i) => ({ v: i === 0 ? `── ${team.toUpperCase()} ──` : '', s: teamBanner }));
+          fullMergeAt(rows.length).forEach(m => merges.push(m));
+          rows.push(banner);
+          appendTeamLevels(rows, merges, teamDevotees);
+          rows.push(emptyRow());
+        });
+        if (!rows.length) return;
+        const ws = _xlsSheet(rows, colWidths);
+        ws['!merges'] = merges;
+        ws['!rows']   = rows.map(() => ({ hpt: 18 }));
+        XLSX.utils.book_append_sheet(wb, ws, dept.slice(0, 31));
+      });
+    }
 
     // All Teams sheet
     {
@@ -1198,6 +1302,7 @@ const IMPORT_FIELDS = [
   { key: 'referenceBy',        label: 'Reference By',            aliases: ['Reference','Ref','Reference By','Referred By','Ref-2','ref','Ref 2','reference'] },
   { key: 'facilitator',        label: 'Facilitator',             aliases: ['Facilitator','facilitator','Faciltr'] },
   { key: 'callingBy',          label: 'Calling By',              aliases: ['Calling By','Called By','Caller','Calling by','calling by','CallingBy'] },
+  { key: 'department',         label: 'Department',              aliases: ['Department','Dept','department','Dept.','DEPT','dept'] },
 ];
 
 let _importRows = [], _importMode = 'add';
@@ -1635,7 +1740,7 @@ async function importWithMapping(rows, colMap, mode = 'add') {
           referenceBy:         String(getField(row, 'referenceBy')) || null,
           facilitator:         String(getField(row, 'facilitator')) || null,
           callingBy:           String(getField(row, 'callingBy')) || null,
-          department:          (() => { const g = String(getField(row, 'gender')); const t = String(getField(row, 'teamName')); return getDeptForGender(g) || getDeptForTeam(t) || null; })(),
+          department:          (() => { const g = String(getField(row, 'gender')); const t = String(getField(row, 'teamName')); const d = String(getField(row, 'department') || ''); return getDeptForTeam(t) || getDeptForGender(g) || (d && d !== 'null' ? d : null) || null; })(),
           isActive: true, inactivityFlag: false, updatedAt: TS(),
         };
         Object.keys(payload).forEach(k => { if (payload[k] === 'null' || payload[k] === '') payload[k] = null; });
@@ -1999,9 +2104,15 @@ async function _doExportAttSheet(bounds, newSince, filename) {
   });
 
   const allDevotees = await DevoteeCache.all();
+  const _attCanonTeams = typeof DEPARTMENTS !== 'undefined' ? Object.values(DEPARTMENTS).flat() : [];
   const devotees = allDevotees
     .filter(d => d.isActive !== false && !d.isNotInterested && d.callingMode !== 'not_interested')
-    .sort((a, b) => (a.teamName || '').localeCompare(b.teamName || '') || (a.name || '').localeCompare(b.name || ''));
+    .sort((a, b) => {
+      const ai = _attCanonTeams.indexOf(a.teamName || '');
+      const bi = _attCanonTeams.indexOf(b.teamName || '');
+      if (ai !== bi) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+      return (a.name || '').localeCompare(b.name || '');
+    });
 
   const newSinceDate = new Date(newSince);
   const newInPeriod = new Set(devotees
@@ -2041,6 +2152,12 @@ async function _doExportAttSheet(bounds, newSince, filename) {
 
   let sno = 1;
   let currentTeam = null;
+  let _attLastDept = null;
+  const _deptRows = {};
+  const _deptTeamSeen = {};
+  if (typeof DEPARTMENTS !== 'undefined') {
+    Object.keys(DEPARTMENTS).forEach(d => { _deptRows[d] = []; _deptTeamSeen[d] = null; });
+  }
 
   devotees.forEach(d => {
     const team = d.teamName || 'Other';
@@ -2051,6 +2168,15 @@ async function _doExportAttSheet(bounds, newSince, filename) {
 
     if (team !== currentTeam) {
       currentTeam = team;
+      // Dept separator (dark navy) before first team of each new dept
+      const _thisDept = typeof getDeptForTeam === 'function' ? getDeptForTeam(team) : null;
+      if (_thisDept && _thisDept !== _attLastDept) {
+        _attLastDept = _thisDept;
+        const dRow = [{ v: _thisDept, s: XS.hdr('0D2D5A', 'FFFFFF') }];
+        for (let c = 1; c < hdr1.length; c++) dRow.push({ v: '', s: XS.hdr('0D2D5A', 'FFFFFF') });
+        dataRows.push(dRow);
+        styleMatrix.push(dRow.map(c => c.s));
+      }
       const sepRow = [{ v: team, s: XS.hdr('2E7D32') }];
       for (let c = 1; c < hdr1.length; c++) sepRow.push({ v: '', s: XS.hdr('2E7D32') });
       dataRows.push(sepRow);
@@ -2088,6 +2214,18 @@ async function _doExportAttSheet(bounds, newSince, filename) {
     rowStyles.push(totalStyle);
     dataRows.push(row);
     styleMatrix.push(rowStyles);
+
+    // Accumulate row into dept-specific sheet data
+    const _devDept = typeof getDeptForTeam === 'function' ? getDeptForTeam(team) : null;
+    if (_devDept && _deptRows[_devDept] !== undefined) {
+      if (team !== _deptTeamSeen[_devDept]) {
+        _deptTeamSeen[_devDept] = team;
+        const _dSep = [{ v: team, s: XS.hdr('2E7D32') }];
+        for (let c = 1; c < hdr1.length; c++) _dSep.push({ v: '', s: XS.hdr('2E7D32') });
+        _deptRows[_devDept].push(_dSep);
+      }
+      _deptRows[_devDept].push(row);
+    }
   });
 
   const allRows = [hdr1, hdr2, hdr3, ...dataRows];
@@ -2119,6 +2257,39 @@ async function _doExportAttSheet(bounds, newSince, filename) {
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, bounds.label.replace(/[:\\/?*[\]]/g, '').slice(0, 31));
+
+  // Dept sheets (ICF_Prji / ICF_Mtg)
+  Object.entries(_deptRows).forEach(([dept, dRows]) => {
+    if (!dRows.length) return;
+    const dAllRows = [hdr1, hdr2, hdr3, ...dRows];
+    const dWs = {};
+    let dMaxC = 0;
+    dAllRows.forEach((dRow, r) => {
+      dRow.forEach((val, c) => {
+        dMaxC = Math.max(dMaxC, c);
+        const addr = XLSX.utils.encode_cell({ r, c });
+        if (val && typeof val === 'object' && 'v' in val) {
+          dWs[addr] = { v: val.v, t: typeof val.v === 'number' ? 'n' : 's' };
+          if (val.s) dWs[addr].s = val.s;
+        } else {
+          dWs[addr] = { v: val ?? '', t: typeof val === 'number' ? 'n' : 's' };
+        }
+      });
+    });
+    dWs['!ref'] = XLSX.utils.encode_range({ s:{r:0,c:0}, e:{r:dAllRows.length-1,c:dMaxC} });
+    dWs['!cols'] = colWidths;
+    dWs['!merges'] = [];
+    let dmc = FIXED_COLS;
+    sessions.forEach(() => {
+      dWs['!merges'].push({ s:{r:0,c:dmc}, e:{r:0,c:dmc+1} });
+      dWs['!merges'].push({ s:{r:1,c:dmc}, e:{r:1,c:dmc+1} });
+      dmc += 2;
+    });
+    for (let c = 0; c < FIXED_COLS; c++) dWs['!merges'].push({ s:{r:0,c}, e:{r:2,c} });
+    dWs['!merges'].push({ s:{r:0,c:dmc}, e:{r:1,c:dmc} });
+    XLSX.utils.book_append_sheet(wb, dWs, dept.slice(0, 31));
+  });
+
   XLSX.writeFile(wb, filename);
   showToast('Downloaded!', 'success');
 }

@@ -179,7 +179,10 @@ function _dashRender(data, ctx) {
   const { sessionId, sessionDate, callingDate, activityStart, activityEnd } = ctx;
 
   const filterTeam = (typeof getFilterTeam === 'function') ? getFilterTeam() : '';
-  const teamsToShow = filterTeam ? [filterTeam] : TEAMS;
+  const filterDept = (typeof getFilterDept === 'function') ? getFilterDept() : '';
+  const teamsToShow = filterTeam ? [filterTeam]
+    : filterDept && typeof getTeamsForDept === 'function' ? getTeamsForDept(filterDept)
+    : TEAMS;
 
   const rows = teamsToShow.map(team => {
     const members = allDevotees.filter(d =>
@@ -276,14 +279,27 @@ function _dashRender(data, ctx) {
           </tr>
         </thead>
         <tbody>
-          ${rows.map(r => `<tr>
-            <td class="dt-team">${r.team}</td>
-            <td class="dt-num"><button onclick="openDashboardList('called',   '${r.team.replace(/'/g,"\\'")}')">${r.called}</button></td>
-            <td class="dt-num"><button onclick="openDashboardList('coming',   '${r.team.replace(/'/g,"\\'")}')">${r.coming}</button></td>
-            <td class="dt-num" style="background:#e8edf5;font-weight:800;color:#0d2d5a">${r.target}</td>
-            <td class="dt-num"><button onclick="openDashboardList('attended', '${r.team.replace(/'/g,"\\'")}')">${r.attended}</button></td>
-            <td class="dt-pct ${pctCls(r.pct)}">${r.pct}%</td>
-          </tr>`).join('')}
+          ${(() => {
+            const _drRow = r => `<tr>
+              <td class="dt-team">${r.team}</td>
+              <td class="dt-num"><button onclick="openDashboardList('called','${r.team.replace(/'/g,"\\'")}')">${r.called}</button></td>
+              <td class="dt-num"><button onclick="openDashboardList('coming','${r.team.replace(/'/g,"\\'")}')">${r.coming}</button></td>
+              <td class="dt-num" style="background:#e8edf5;font-weight:800;color:#0d2d5a">${r.target}</td>
+              <td class="dt-num"><button onclick="openDashboardList('attended','${r.team.replace(/'/g,"\\'")}')">${r.attended}</button></td>
+              <td class="dt-pct ${pctCls(r.pct)}">${r.pct}%</td>
+            </tr>`;
+            if (!filterTeam && !filterDept && typeof getDeptForTeam === 'function' && typeof DEPARTMENTS !== 'undefined') {
+              const _dp = [];
+              Object.keys(DEPARTMENTS).forEach(dept => {
+                const dr = rows.filter(r => getDeptForTeam(r.team) === dept);
+                if (!dr.length) return;
+                _dp.push(`<tr><td colspan="6" style="background:#0d2d5a;color:#fff;font-weight:700;font-size:.78rem;text-align:center;padding:.35rem .75rem;letter-spacing:.06em;text-transform:uppercase">${dept}</td></tr>`);
+                dr.forEach(r => _dp.push(_drRow(r)));
+              });
+              return _dp.join('');
+            }
+            return rows.map(_drRow).join('');
+          })()}
           <tr>
             <td class="dt-team">Grand Total</td>
             <td class="dt-num">${total.called}</td>
@@ -639,7 +655,8 @@ async function loadSeriousAnalysis() {
 
 async function loadTeamLeaderboard() {
   const c = document.getElementById('team-leaderboard-content');
-  const lbKey = `${AppState.currentReportSessionId || AppState.currentSessionId || ''}`;
+  const _lbTLDept = (typeof getFilterDept === 'function') ? getFilterDept() : '';
+  const lbKey = `${AppState.currentReportSessionId || AppState.currentSessionId || ''}:${_lbTLDept}`;
   if (_lbReportCache && _lbReportCache.key === lbKey && Date.now() - _lbReportCache.ts < _REPORT_TTL) {
     c.innerHTML = _lbReportCache.html;
     return;
@@ -652,22 +669,56 @@ async function loadTeamLeaderboard() {
       DB.getAttendanceTargets().catch(() => ({ type: 'class', teams: {} })),
     ]);
     // Compute configTarget and pct for every row first, then sort by pct
-    const ranked = data.map(row => {
+    let ranked = data.map(row => {
       const configTarget = (targetCfg.teams && targetCfg.teams[row.team] > 0)
         ? targetCfg.teams[row.team]
         : (targetCfg.global > 0 ? targetCfg.global : row.total);
       const pct = configTarget > 0 ? Math.round(row.actualPresent / configTarget * 100) : 0;
       return { ...row, configTarget, pct };
     });
-    ranked.sort((a, b) => b.pct - a.pct || b.actualPresent - a.actualPresent);
+    // Filter by active dept, then sort: within each dept by pct desc
+    if (_lbTLDept && typeof getTeamsForDept === 'function') {
+      const _lbTLTeams = getTeamsForDept(_lbTLDept);
+      ranked = ranked.filter(r => _lbTLTeams.includes(r.team));
+      ranked.sort((a, b) => b.pct - a.pct || b.actualPresent - a.actualPresent);
+    } else {
+      // Group by dept, sort by pct within each dept
+      const teamsSorted = (typeof sortTeamsByDept === 'function')
+        ? sortTeamsByDept(ranked.map(r => r.team))
+        : ranked.map(r => r.team);
+      // Within each dept sort by pct
+      const byDept = {};
+      ranked.forEach(r => {
+        const d = (typeof getDeptForTeam === 'function') ? getDeptForTeam(r.team) : '';
+        if (!byDept[d]) byDept[d] = [];
+        byDept[d].push(r);
+      });
+      Object.values(byDept).forEach(arr => arr.sort((a, b) => b.pct - a.pct || b.actualPresent - a.actualPresent));
+      ranked = [];
+      teamsSorted.forEach(t => {
+        const d = (typeof getDeptForTeam === 'function') ? getDeptForTeam(t) : '';
+        const match = (byDept[d] || []).find(r => r.team === t);
+        if (match && !ranked.includes(match)) ranked.push(match);
+      });
+    }
 
+    let _lbLastDept = null;
+    let rankNum = 0;
     c.innerHTML = `<div class="table-scroll"><table class="report-table leaderboard-table">
       <thead><tr><th>Rank</th><th>Team</th><th>Total</th><th>Calling List</th><th>Target</th><th>Present</th><th>Achievement</th></tr></thead>
-      <tbody>${ranked.map((row, i) => {
-        const medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':`#${i+1}`;
-        const cls   = i===0?'rank-1':i===1?'rank-2':i===2?'rank-3':'';
+      <tbody>${ranked.map(row => {
+        const dept = (typeof getDeptForTeam === 'function') ? getDeptForTeam(row.team) : '';
+        let hdr = '';
+        if (!_lbTLDept && dept && dept !== _lbLastDept) {
+          _lbLastDept = dept;
+          rankNum = 0;
+          hdr = (typeof deptGroupHeaderHTML === 'function') ? deptGroupHeaderHTML(7, dept) : '';
+        }
+        rankNum++;
+        const medal = rankNum===1?'🥇':rankNum===2?'🥈':rankNum===3?'🥉':`#${rankNum}`;
+        const cls   = rankNum===1?'rank-1':rankNum===2?'rank-2':rankNum===3?'rank-3':'';
         const col   = row.pct>=100?'var(--success)':row.pct>=70?'var(--warning)':'var(--danger)';
-        return `<tr>
+        return `${hdr}<tr>
           <td class="leaderboard-rank ${cls}">${medal}</td>
           <td style="font-weight:700">${row.team}</td>
           <td style="text-align:center">${row.total}</td>
@@ -773,10 +824,14 @@ function _careRender() {
   if (!_careRawCache) return;
   const team = getFilterTeam();
   const dept = (typeof getFilterDept === 'function') ? getFilterDept() : '';
-  const deptTeams = (dept && typeof getTeamsForDept === 'function') ? getTeamsForDept(dept) : [];
   const tf = list => {
     if (team) return list.filter(d => (d.team_name || d.teamName) === team);
-    if (deptTeams.length) return list.filter(d => deptTeams.includes(d.team_name || d.teamName));
+    if (dept && typeof matchesDept === 'function') {
+      return list.filter(d => matchesDept(
+        { teamName: d.team_name || d.teamName, department: d.department, gender: d.gender },
+        dept
+      ));
+    }
     return list;
   };
 
@@ -1690,9 +1745,15 @@ async function exportMgmtFY() {
       ...fyWeeks.flatMap(() => [{ wch: 9 }, { wch: 9 }]), { wch: 8 }];
     const rows = [headers.map(h => ({ v: h, s: HDR }))];
     let sno = 1;
+    let _mgmtLastDept = null;
     TEAMS.forEach(team => {
       const members = activeDevotees.filter(d => (d.teamName || '') === team);
       if (!members.length) return;
+      const _thisDept = typeof getDeptForTeam === 'function' ? getDeptForTeam(team) : null;
+      if (_thisDept && _thisDept !== _mgmtLastDept) {
+        _mgmtLastDept = _thisDept;
+        rows.push([_thisDept, ...Array(headers.length - 1).fill('')].map((v, i) => ({ v, s: i === 0 ? GRD : XS.hdr('0D2D5A', 'FFFFFF') })));
+      }
       rows.push([team, ...Array(headers.length - 1).fill('')].map((v, i) => ({ v, s: i === 0 ? SUB : XS.hdr('C8E6C9', '1B5E20') })));
       members.forEach(d => {
         const wkVals = fyWeeks.flatMap(w => {
@@ -3002,7 +3063,13 @@ async function loadLateComersReport() {
     const records = await DB.getSessionAttendance(sessionId);
 
     const teamFilter = (typeof getFilterTeam === 'function') ? getFilterTeam() : '';
-    const filtered = teamFilter ? records.filter(r => r.team_name === teamFilter) : records;
+    const deptFilter = (typeof getFilterDept === 'function') ? getFilterDept() : '';
+    const filtered = records.filter(r => {
+      if (teamFilter) return r.team_name === teamFilter;
+      if (deptFilter && typeof matchesDept === 'function')
+        return matchesDept({ teamName: r.team_name, department: r.department, gender: r.gender }, deptFilter);
+      return true;
+    });
 
     _lateDataCache = filtered;
     _renderLateComers();
@@ -3180,7 +3247,6 @@ window.loadMeetingsTab = loadMeetingsTab;
 const INTERACTION_LEVELS = {
   1: { name: 'HG Ram Atirapriya Prabhuji', abbr: 'Prabhuji (L1)', color: '#7c3aed', bg: '#f5f3ff' },
   2: { name: 'HG Sulakshana Sita Mataji',  abbr: 'Mataji (L2)',   color: '#0369a1', bg: '#eff6ff' },
-  3: { name: 'Naveena (Senior)',            abbr: 'Senior (L3)',   color: '#0f766e', bg: '#f0fdfa' },
   4: { name: 'Team Coordinator',           abbr: 'Coordinator (L4)', color: '#0d2d5a', bg: '#eef3fb' },
 };
 window.INTERACTION_LEVELS = INTERACTION_LEVELS;

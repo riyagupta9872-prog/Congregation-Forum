@@ -334,7 +334,11 @@ async function loadAttendanceSession(sessionId) {
 async function updateAttendanceStats() {
   if (!AppState.currentSessionId) return;
   try {
-    const s = await DB.getSessionStats(AppState.currentSessionId);
+    const _attFilters = {
+      team: (typeof getFilterTeam === 'function') ? getFilterTeam() : '',
+      dept: (typeof getFilterDept === 'function') ? getFilterDept() : '',
+    };
+    const s = await DB.getSessionStats(AppState.currentSessionId, _attFilters);
     document.getElementById('stat-confirmed').textContent = s.confirmed;
     document.getElementById('stat-present').textContent   = s.present;
     document.getElementById('stat-new').textContent       = s.newDevotees;
@@ -573,7 +577,6 @@ const _CP_LEVELS = {
   0: { label: 'All Levels',                   abbr: 'All',        color: '#0d2d5a', bg: '#eef3fb' },
   1: { label: 'HG Ram Atirapriya Prabhuji',   abbr: 'L1 · Prabhuji', color: '#7c3aed', bg: '#f5f3ff' },
   2: { label: 'HG Sulakshana Sita Mataji',    abbr: 'L2 · Mataji',   color: '#0369a1', bg: '#eff6ff' },
-  3: { label: 'Naveena (Senior)',              abbr: 'L3 · Senior',   color: '#0f766e', bg: '#f0fdfa' },
   4: { label: 'Team Coordinator',             abbr: 'L4 · Coord',    color: '#0d2d5a', bg: '#eef3fb' },
 };
 let _cpLevelFilter = 0;  // 0 = all levels

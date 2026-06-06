@@ -119,8 +119,7 @@ const DB = {
       list = list.filter(d => d.name.toLowerCase().includes(s) || (d.mobile || '').includes(s));
     }
     if (filters.dept) {
-      const deptTeams = getTeamsForDept(filters.dept);
-      list = list.filter(d => deptTeams.includes(d.teamName) || d.department === filters.dept);
+      list = list.filter(d => matchesDept(d, filters.dept));
     }
     if (filters.team)       list = list.filter(d => d.teamName === filters.team);
     if (filters.calling_by) list = list.filter(d => d.callingBy === filters.calling_by);
@@ -404,7 +403,7 @@ const DB = {
     return { sessions, devotees, attMap, attTimeMap, csMap };
   },
 
-  async getSessionStats(sessionId) {
+  async getSessionStats(sessionId, filters = {}) {
     // sessionId may be the Firestore doc ID OR the date string (YYYY-MM-DD).
     // Try doc lookup first; if missing, fall back to a date query.
     const [sessSnap, cfgSnap] = await Promise.all([
@@ -436,6 +435,14 @@ const DB = {
       DevoteeCache.all(),
       fdb.collection('callingSubmissions').where('weekDate', '==', weekDate).get(),
     ]);
+    // Scope to team/dept if a filter is active
+    let scopedIds = null;
+    if (filters.team) {
+      scopedIds = new Set(allDevotees.filter(d => d.teamName === filters.team).map(d => d.id));
+    } else if (filters.dept) {
+      scopedIds = new Set(allDevotees.filter(d => matchesDept(d, filters.dept)).map(d => d.id));
+    }
+
     // Only count "Yes" from callers who have submitted — matches the calling report logic
     // so the attendance "Confirmed" tile and the report "Yes" column show the same number.
     const submittedCallers = new Set(submSnap.docs.map(d => d.data().userName).filter(Boolean));
@@ -443,14 +450,18 @@ const DB = {
     allDevotees.forEach(d => { if (d.callingBy) devCallerMap[d.id] = d.callingBy; });
     const confirmed = cs.docs.filter(d => {
       if (d.data().comingStatus !== 'Yes') return false;
+      if (scopedIds && !scopedIds.has(d.data().devoteeId)) return false;
       const caller = devCallerMap[d.data().devoteeId];
       return !caller || submittedCallers.has(caller);
     }).length;
     // "New" = attendance records explicitly marked isNewDevotee
-    const newPresentSet = new Set(at.docs.filter(d => d.data().isNewDevotee).map(d => d.data().devoteeId));
-    const newDevotees = newPresentSet.size;
-    const present     = at.size - newDevotees;   // regular attendees only
-    const totalPresent = at.size;                // present + new = all who attended
+    const atDocs = scopedIds
+      ? at.docs.filter(d => scopedIds.has(d.data().devoteeId))
+      : at.docs;
+    const newPresentSet = new Set(atDocs.filter(d => d.data().isNewDevotee).map(d => d.data().devoteeId));
+    const newDevotees  = newPresentSet.size;
+    const present      = atDocs.length - newDevotees;
+    const totalPresent = atDocs.length;
     return { confirmed, present, newDevotees, totalPresent };
   },
 
@@ -498,8 +509,7 @@ const DB = {
     if (_attTeam) {
       list = list.filter(d => d.teamName === _attTeam);
     } else if (_attDept) {
-      const _attDeptTeams = getTeamsForDept(_attDept);
-      list = list.filter(d => _attDeptTeams.includes(d.teamName) || d.department === _attDept);
+      list = list.filter(d => matchesDept(d, _attDept));
     }
     return list.map(d => ({
       ...toSnake(d),
@@ -800,6 +810,33 @@ const DB = {
     return ids.length > 0;
   },
 
+  // One-time backfill: write `department` on every active devotee that is
+  // missing it, derived from their teamName (→ getDeptForTeam) or gender
+  // (→ getDeptForGender). Re-runnable: if already ran, returns { count: 0, alreadyDone: true }.
+  async backfillDepartmentOnce() {
+    const migKey = 'deptBackfill_v1';
+    try {
+      const mDoc = await fdb.collection('settings').doc('migrations').get();
+      if (mDoc.exists && mDoc.data()[migKey]) return { count: 0, alreadyDone: true };
+    } catch (_) {}
+    const all = await DevoteeCache.all();
+    const toUpdate = all.filter(d => {
+      const dept = getDeptForTeam(d.teamName) || getDeptForGender(d.gender);
+      return dept && d.department !== dept;
+    });
+    const BATCH = 400;
+    for (let i = 0; i < toUpdate.length; i += BATCH) {
+      const batch = fdb.batch();
+      toUpdate.slice(i, i + BATCH).forEach(d => {
+        const dept = getDeptForTeam(d.teamName) || getDeptForGender(d.gender);
+        batch.set(fdb.collection('devotees').doc(d.id), { department: dept }, { merge: true });
+      });
+      await batch.commit();
+    }
+    await fdb.collection('settings').doc('migrations').set({ [migKey]: true }, { merge: true });
+    return { count: toUpdate.length, alreadyDone: false };
+  },
+
   /* CALLING */
   async getCallingStatus(weekDate) {
     const [raw, csSnap, cfgSnap] = await Promise.all([
@@ -867,8 +904,7 @@ const DB = {
     if (AppState.userRole === 'teamAdmin' && AppState.userTeam) {
       filtered = filtered.filter(d => d.teamName === AppState.userTeam);
     } else if (typeof isDeptAdmin === 'function' && isDeptAdmin() && AppState.userDept) {
-      const _dtTeams = getTeamsForDept(AppState.userDept);
-      filtered = filtered.filter(d => _dtTeams.includes(d.teamName) || d.department === AppState.userDept);
+      filtered = filtered.filter(d => matchesDept(d, AppState.userDept));
     }
     // Also honour master filter bar team/dept selection
     const _tcTeam = AppState.filters?.team || '';
@@ -876,8 +912,7 @@ const DB = {
     if (_tcTeam) {
       filtered = filtered.filter(d => d.teamName === _tcTeam);
     } else if (_tcDept && AppState.userRole === 'superAdmin') {
-      const _tcDeptTeams = getTeamsForDept(_tcDept);
-      filtered = filtered.filter(d => _tcDeptTeams.includes(d.teamName) || d.department === _tcDept);
+      filtered = filtered.filter(d => matchesDept(d, _tcDept));
     }
     const devotees = filtered.map(d => ({
       ...toSnake(d),
@@ -974,7 +1009,7 @@ const DB = {
 
   // Returns last 4 calling weeks + per-devotee status + which devotee+week combos
   // had post-submission edits (for the pencil icon in the Calling History grid).
-  async getCallingHistoryGrid(teamFilter, callerFilter) {
+  async getCallingHistoryGrid(teamFilter, callerFilter, deptFilter) {
     // Last 4 calling Saturdays — find the most recent Saturday, step back weekly
     const saturdays = [];
     const anchor = new Date();
@@ -1027,6 +1062,7 @@ const DB = {
 
     // Filter devotees
     let devotees = allDevotees.filter(d => d.isActive !== false && !d.isNotInterested && d.callingBy);
+    if (deptFilter)   devotees = devotees.filter(d => matchesDept(d, deptFilter));
     if (teamFilter)   devotees = devotees.filter(d => d.teamName   === teamFilter);
     if (callerFilter) devotees = devotees.filter(d => d.callingBy  === callerFilter);
     devotees.sort((a, b) => (a.teamName || '').localeCompare(b.teamName || '') || (a.name || '').localeCompare(b.name || ''));

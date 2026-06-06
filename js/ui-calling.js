@@ -535,12 +535,14 @@ function filterCallingList() {
   const team = (typeof getFilterTeam      === 'function') ? getFilterTeam()      : '';
   const by   = (typeof getFilterCallingBy === 'function') ? getFilterCallingBy() : '';
   const dept = (typeof getFilterDept      === 'function') ? getFilterDept()      : '';
-  const deptTeams = (dept && typeof getTeamsForDept === 'function') ? getTeamsForDept(dept) : [];
   const filtered = AppState.callingData.filter(d => {
     if (q    && !d.name.toLowerCase().includes(q) && !(d.mobile||'').includes(q)) return false;
     if (team && d.team_name !== team) return false;
-    // If no team is selected but a dept is, restrict to that dept's teams.
-    if (!team && deptTeams.length && !deptTeams.includes(d.team_name)) return false;
+    // If no team is selected but a dept is, restrict to that dept's teams OR gender.
+    if (!team && dept) {
+      const _dObj = { teamName: d.team_name, department: d.department, gender: d.gender };
+      if (typeof matchesDept === 'function' && !matchesDept(_dObj, dept)) return false;
+    }
     if (by   && d.calling_by !== by) return false;
     if (s) {
       if (s === '_none') return !d.coming_status && !d.calling_reason && !d.calling_notes;
@@ -1309,17 +1311,27 @@ async function loadCallingReports() {
 async function _loadCallingSummary(week, el) {
   try {
     const report = await DB.getCallingReport(week);
-    const teams = Object.keys(report).filter(k => !k.startsWith('_'));
+    const _dept = (typeof getFilterDept === 'function') ? getFilterDept() : '';
+    const _deptTeams = _dept ? getTeamsForDept(_dept) : null;
+    let teams = Object.keys(report).filter(k => !k.startsWith('_'));
+    if (_deptTeams) teams = teams.filter(t => _deptTeams.includes(t));
     if (!teams.length) {
       el.innerHTML = '<div class="empty-state"><i class="fas fa-chart-bar"></i><p>No calling data for this week</p></div>';
       return;
     }
+    teams = (typeof sortTeamsByDept === 'function') ? sortTeamsByDept(teams) : teams;
     const weekLabel = formatDate(week);
     let gTotal=0, gCalled=0, gNC=0, gYes=0, gOnline=0, gFestival=0, gNI=0;
     let bodyRows = '';
     let gUnsubmitted = 0;
+    let _lastDept = null;
 
     teams.forEach((team, ti) => {
+      // Dept group header
+      if (typeof getDeptForTeam === 'function' && typeof deptGroupHeaderHTML === 'function') {
+        const _td = getDeptForTeam(team);
+        if (_td && _td !== _lastDept) { _lastDept = _td; bodyRows += deptGroupHeaderHTML(6, _td); }
+      }
       const t = report[team];
       const unsub = t.unsubmittedTotal || 0;
       // "Effective Not Called" = devotees not recorded by submitted callers
@@ -1413,11 +1425,15 @@ async function _loadCallingSummary(week, el) {
 async function _loadAccuracyReport(week, el) {
   try {
     const report = await DB.getCallingReport(week);
-    const teams = Object.keys(report).filter(k => !k.startsWith('_'));
+    const _dept = (typeof getFilterDept === 'function') ? getFilterDept() : '';
+    const _deptTeams = _dept ? getTeamsForDept(_dept) : null;
+    let teams = Object.keys(report).filter(k => !k.startsWith('_'));
+    if (_deptTeams) teams = teams.filter(t => _deptTeams.includes(t));
     if (!teams.length) {
       el.innerHTML = '<div class="empty-state"><i class="fas fa-chart-bar"></i><p>No calling data for this week</p></div>';
       return;
     }
+    teams = (typeof sortTeamsByDept === 'function') ? sortTeamsByDept(teams) : teams;
     const hasSession = report._hasSession;
     const weekLabel = formatDate(week);
     // Show the Sunday class date in messages, not the Saturday calling date.
@@ -1432,8 +1448,13 @@ async function _loadAccuracyReport(week, el) {
 
     let grandYes=0, grandAbsent=0;
     let bodyRows = '';
+    let _accLastDept = null;
 
     teams.forEach(team => {
+      if (typeof getDeptForTeam === 'function' && typeof deptGroupHeaderHTML === 'function') {
+        const _td = getDeptForTeam(team);
+        if (_td && _td !== _accLastDept) { _accLastDept = _td; bodyRows += deptGroupHeaderHTML(4, _td); }
+      }
       const t = report[team];
       grandYes += t.yes; grandAbsent += t.yesNotCame;
       const teamAbsentBtn = t.yesNotCame > 0
@@ -1635,7 +1656,12 @@ async function loadLateReports() {
   const el = document.getElementById('calling-late-content');
   el.innerHTML = '<div class="loading"><i class="fas fa-spinner"></i> Loading…</div>';
   try {
-    const { fourWeeks, submMap, teamRows } = await DB.getSubmissionReport();
+    const { fourWeeks, submMap, teamRows: _allTeamRows } = await DB.getSubmissionReport();
+
+    // Filter teamRows by active dept filter
+    const _lrDept = (typeof getFilterDept === 'function') ? getFilterDept() : '';
+    const _lrDeptTeams = _lrDept ? getTeamsForDept(_lrDept) : null;
+    const teamRows = _lrDeptTeams ? _allTeamRows.filter(r => _lrDeptTeams.includes(r.team)) : _allTeamRows;
 
     // Scope to 4 calling weeks up to the selected session's date (main filter)
     const refDate = (typeof _reportActive !== 'undefined' && _reportActive?.session_date)
@@ -1696,28 +1722,43 @@ async function loadLateReports() {
     const STRIPE_EVEN = '#f1f5f9';
     const LATE_BG     = '#fff7ed';
 
-    const body = rows.map((r, i) => {
+    const _lrRowHtml = (r, idx) => {
       const lastCell = r.cells[r.cells.length - 1];
       const isLate   = lastCell?.state === 'late';
-      const rowCls   = isLate ? 'sr-row-late-cur' : '';
-      const rowBg    = isLate ? LATE_BG : (i % 2 === 0 ? STRIPE_ODD : STRIPE_EVEN);
-      const stickyBg = rowBg;
-      const badge = r.isAdmin
-        ? `<span class="badge-tc" style="margin-left:.3rem;font-size:.66rem"><i class="fas fa-crown"></i> TC</span>` : '';
-      const lateCellColor = r.lateCount > 0 ? 'var(--danger)' : 'var(--text-muted)';
-      const lateCellBg   = r.lateCount > 2 ? 'background:#fecdd3' : r.lateCount > 0 ? 'background:#fff7ed' : '';
-      return `<tr class="${rowCls}" style="background:${rowBg}">
-        <td class="sr-sno-cell" style="position:sticky;left:0;z-index:2;background:${stickyBg};width:${SNO_W}px;min-width:${SNO_W}px">${i + 1}</td>
-        <td class="sr-name-cell" style="position:sticky;left:${SNO_W}px;z-index:2;background:${stickyBg};min-width:${NAME_W}px;white-space:nowrap;${NAME_SEP}">${r.name}${badge}</td>
+      const rowBg    = isLate ? LATE_BG : (idx % 2 === 0 ? STRIPE_ODD : STRIPE_EVEN);
+      const badge    = r.isAdmin ? `<span class="badge-tc" style="margin-left:.3rem;font-size:.66rem"><i class="fas fa-crown"></i> TC</span>` : '';
+      const lateClr  = r.lateCount > 0 ? 'var(--danger)' : 'var(--text-muted)';
+      const lateBg   = r.lateCount > 2 ? 'background:#fecdd3' : r.lateCount > 0 ? 'background:#fff7ed' : '';
+      return `<tr class="${isLate ? 'sr-row-late-cur' : ''}" style="background:${rowBg}">
+        <td class="sr-sno-cell" style="position:sticky;left:0;z-index:2;background:${rowBg};width:${SNO_W}px;min-width:${SNO_W}px">${idx + 1}</td>
+        <td class="sr-name-cell" style="position:sticky;left:${SNO_W}px;z-index:2;background:${rowBg};min-width:${NAME_W}px;white-space:nowrap;${NAME_SEP}">${r.name}${badge}</td>
         <td>${teamBadge(r.team)}</td>
         ${r.cells.map(c => {
           if (c.state === 'none') return `<td class="sr-cell sr-empty">—</td>`;
           if (c.state === 'late') return `<td class="sr-cell sr-late"><i class="fas fa-exclamation-circle"></i> ${c.text}</td>`;
           return `<td class="sr-cell sr-ok"><i class="fas fa-check-circle"></i> ${c.text}</td>`;
         }).join('')}
-        <td style="text-align:center;font-weight:700;color:${lateCellColor};${lateCellBg}">${r.lateCount}</td>
+        <td style="text-align:center;font-weight:700;color:${lateClr};${lateBg}">${r.lateCount}</td>
       </tr>`;
-    }).join('');
+    };
+    const _lrSpan = weeks.length + 4;
+    const _lrParts = [];
+    let _lrIdx = 0;
+    if (!_lrDept && typeof getDeptForTeam === 'function' && typeof DEPARTMENTS !== 'undefined') {
+      const _lrByDept = {};
+      rows.forEach(r => {
+        const d = getDeptForTeam(r.team) || '—';
+        if (!_lrByDept[d]) _lrByDept[d] = [];
+        _lrByDept[d].push(r);
+      });
+      Object.keys(DEPARTMENTS).filter(d => _lrByDept[d]?.length).forEach(dept => {
+        _lrParts.push(deptGroupHeaderHTML(_lrSpan, dept));
+        _lrByDept[dept].forEach(r => _lrParts.push(_lrRowHtml(r, _lrIdx++)));
+      });
+    } else {
+      rows.forEach(r => _lrParts.push(_lrRowHtml(r, _lrIdx++)));
+    }
+    const body = _lrParts.join('');
 
     el.innerHTML = `
       <div class="sr-legend" style="margin-bottom:.6rem">
@@ -1816,7 +1857,8 @@ async function loadCallingHistory() {
   if (!el) return;
   const teamFilter   = getFilterTeam();
   const callerFilter = getFilterCallingBy();
-  const chKey = `${teamFilter}:${callerFilter}`;
+  const deptFilter   = (typeof getFilterDept === 'function') ? getFilterDept() : '';
+  const chKey = `${deptFilter}:${teamFilter}:${callerFilter}`;
 
   // CACHE HIT — re-render instantly
   if (_chCache && _chCache.key === chKey && Date.now() - _chCache.ts < _CH_TTL) {
@@ -1826,7 +1868,7 @@ async function loadCallingHistory() {
 
   el.innerHTML = '<div class="loading"><i class="fas fa-spinner"></i> Loading…</div>';
   try {
-    const { weeks, devotees, submMap } = await DB.getCallingHistoryGrid(teamFilter, callerFilter);
+    const { weeks, devotees, submMap } = await DB.getCallingHistoryGrid(teamFilter, callerFilter, deptFilter);
 
     if (!devotees.length) {
       el.innerHTML = '<div class="empty-state"><i class="fas fa-history"></i><p>No calling data found</p></div>';
@@ -2211,7 +2253,11 @@ async function loadSaidComingTab() {
     // Use Care's robust implementation which queries Firestore directly
     const sessionDate = (typeof getFilterSessionId === 'function') ? getFilterSessionId() : null;
     const result = await _careFetchSaidComing(sessionDate);
-    const list = result?.list || [];
+    let list = result?.list || [];
+    const _scDept = (typeof getFilterDept === 'function') ? getFilterDept() : '';
+    if (_scDept && typeof matchesDept === 'function') {
+      list = list.filter(d => matchesDept({ teamName: d.team_name, department: d.department, gender: d.gender }, _scDept));
+    }
     _renderCorrelationTab(el, list, '😕 Said Coming — Didn\'t Come', '#dc2626', 'Confirmed on call but absent on session');
   } catch (e) {
     el.innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Failed to load</p></div>';
@@ -2236,8 +2282,10 @@ async function loadNotComingPresentTab() {
   const callingIds = new Set(callingData.map(d => d.id));
   const allDevotees = await DevoteeCache.all().catch(() => []);
 
+  const _ncpDept = (typeof getFilterDept === 'function') ? getFilterDept() : '';
   const surprisePresent = allDevotees.filter(d => {
     if (!presentSet.has(d.id)) return false;
+    if (_ncpDept && typeof matchesDept === 'function' && !matchesDept(d, _ncpDept)) return false;
     const cal = callingData.find(c => c.id === d.id);
     return !cal || cal.coming_status !== 'Yes';
   });
@@ -2354,6 +2402,7 @@ window.addEventListener('filtersChanged', () => {
   const tab = panel?.id?.replace('tab-', '') || AppState.currentTab;
   if (tab !== 'calling') return;
   if (AppState._callingSubTab === 'team-calling')        loadTeamCallingList();
+  else if (AppState._callingSubTab === 'history')        loadCallingHistory?.();
   else if (AppState._callingSubTab === 'said-coming')    loadSaidComingTab?.();
   else if (AppState._callingSubTab === 'not-coming-present') loadNotComingPresentTab?.();
 });
