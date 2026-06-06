@@ -327,31 +327,57 @@ async function renderHomeLeaderboard() {
           if (!_lbByDept[d]) _lbByDept[d] = [];
           _lbByDept[d].push(team);
         });
+        const _lbSubtotalRow = (dept) => {
+          const canonTeams = (typeof DEPARTMENTS !== 'undefined' && DEPARTMENTS[dept]) ? DEPARTMENTS[dept] : (_lbByDept[dept] || []);
+          let deptTotal = 0;
+          const cells = sessions.map(sess => {
+            const presentSet = attMap[sess.id] || new Set();
+            const n = [...presentSet].filter(id => canonTeams.includes(devTeamMap[id])).length;
+            deptTotal += n;
+            const nc = n >= 30 ? '#16a34a' : n >= 20 ? '#d97706' : '#dc2626';
+            return `<td class="lb-td lb-total-td" style="color:${nc}"><strong>${n}</strong></td>`;
+          }).join('');
+          const deptAvg = sessions.length ? Math.round(deptTotal / sessions.length) : 0;
+          const ac = deptAvg >= 30 ? '#16a34a' : deptAvg >= 15 ? '#b45309' : '#dc2626';
+          return `<tr style="background:#eef3fb;border-top:1.5px solid #c5d3e8">
+            <td class="lb-sno-cell"></td>
+            <td class="lb-team-cell" style="color:#0d2d5a;font-weight:700;font-size:.8rem;font-style:italic;padding-left:1rem">Subtotal</td>
+            ${cells}
+            <td class="lb-td lb-avg-td" style="color:${ac};font-weight:800;background:#dde8f5">${deptAvg}</td>
+          </tr>`;
+        };
         const _lbParts = [];
         const _lbSpan = sessions.length + 3;
         Object.keys(DEPARTMENTS).filter(d => _lbByDept[d]?.length).forEach(dept => {
           _lbParts.push(deptGroupHeaderHTML(_lbSpan, dept));
           _lbByDept[dept].forEach((team, ri) => _lbParts.push(_lbMkRow(team, ri)));
+          _lbParts.push(_lbSubtotalRow(dept));
         });
         tableRows = _lbParts.join('');
       }
 
-      // Total row
+      // Total row — only count devotees whose team appears in the table (same as per-team rows)
+      const _sortedSet = new Set(sorted);
       const totalCells = sessions.map(sess => {
-        const n = attMap[sess.id]?.size || 0;
-        return `<td class="lb-td lb-total-td"><strong>${n}</strong></td>`;
+        const presentSet = attMap[sess.id] || new Set();
+        const n = [...presentSet].filter(id => _sortedSet.has(devTeamMap[id])).length;
+        const nc = n >= 50 ? '#16a34a' : n >= 30 ? '#d97706' : '#dc2626';
+        return `<td class="lb-td lb-total-td" style="color:${nc}"><strong>${n}</strong></td>`;
       }).join('');
-      const overallTotal = sessions.reduce((s, sess) => s + (attMap[sess.id]?.size || 0), 0);
+      const overallTotal = sessions.reduce((s, sess) => {
+        const presentSet = attMap[sess.id] || new Set();
+        return s + [...presentSet].filter(id => _sortedSet.has(devTeamMap[id])).length;
+      }, 0);
       const overallAvg = sessions.length ? Math.round(overallTotal / sessions.length) : 0;
       const overallAvgColor = overallAvg >= 15 ? '#16a34a' : overallAvg >= 8 ? '#b45309' : '#dc2626';
 
       tableEl.innerHTML = `
         <div class="table-scroll">
           <table class="lb-table">
-            <thead><tr>
-              <th class="lb-sno-hdr">#</th>
-              <th class="lb-team-hdr">Team</th>${colHdrs}
-              <th style="font-style:italic">Avg</th>
+            <thead><tr style="position:sticky;top:0;z-index:3">
+              <th class="lb-sno-hdr" style="position:sticky;top:0;background:#0d2d5a">#</th>
+              <th class="lb-team-hdr" style="position:sticky;top:0;background:#0d2d5a">Team</th>${colHdrs.replace(/<th>/g,'<th style="position:sticky;top:0;background:#0d2d5a">')}
+              <th style="position:sticky;top:0;background:#0d2d5a;font-style:italic">Avg</th>
             </tr></thead>
             <tbody>${tableRows}</tbody>
             <tfoot><tr>
