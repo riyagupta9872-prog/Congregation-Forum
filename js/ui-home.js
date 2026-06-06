@@ -334,16 +334,16 @@ async function renderHomeLeaderboard() {
             const presentSet = attMap[sess.id] || new Set();
             const n = [...presentSet].filter(id => canonTeams.includes(devTeamMap[id])).length;
             deptTotal += n;
-            const nc = n >= 30 ? '#16a34a' : n >= 20 ? '#d97706' : '#dc2626';
+            const nc = n >= 13 ? '#16a34a' : n >= 10 ? '#d97706' : '#dc2626';
             return `<td class="lb-td lb-total-td" style="color:${nc}"><strong>${n}</strong></td>`;
           }).join('');
           const deptAvg = sessions.length ? Math.round(deptTotal / sessions.length) : 0;
-          const ac = deptAvg >= 30 ? '#16a34a' : deptAvg >= 15 ? '#b45309' : '#dc2626';
-          return `<tr style="background:#eef3fb;border-top:1.5px solid #c5d3e8">
-            <td class="lb-sno-cell"></td>
-            <td class="lb-team-cell" style="color:#0d2d5a;font-weight:700;font-size:.8rem;font-style:italic;padding-left:1rem">Subtotal</td>
+          const ac = deptAvg >= 13 ? '#16a34a' : deptAvg >= 10 ? '#d97706' : '#dc2626';
+          return `<tr style="background:#d0e4f7;border-top:2px solid #7aaddb;border-bottom:2px solid #7aaddb">
+            <td class="lb-sno-cell" style="background:#d0e4f7"></td>
+            <td class="lb-team-cell" style="background:#d0e4f7;color:#0d2d5a;font-weight:800;font-size:.8rem;font-style:italic;padding-left:1rem">Subtotal</td>
             ${cells}
-            <td class="lb-td lb-avg-td" style="color:${ac};font-weight:800;background:#dde8f5">${deptAvg}</td>
+            <td class="lb-td lb-avg-td" style="color:${ac};font-weight:800;background:#b8d4ee">${deptAvg}</td>
           </tr>`;
         };
         const _lbParts = [];
@@ -361,15 +361,14 @@ async function renderHomeLeaderboard() {
       const totalCells = sessions.map(sess => {
         const presentSet = attMap[sess.id] || new Set();
         const n = [...presentSet].filter(id => _sortedSet.has(devTeamMap[id])).length;
-        const nc = n >= 50 ? '#16a34a' : n >= 30 ? '#d97706' : '#dc2626';
-        return `<td class="lb-td lb-total-td" style="color:${nc}"><strong>${n}</strong></td>`;
+        return `<td class="lb-td lb-total-td" style="background:#1a3a5c;color:#ffffff;font-weight:700"><strong>${n}</strong></td>`;
       }).join('');
       const overallTotal = sessions.reduce((s, sess) => {
         const presentSet = attMap[sess.id] || new Set();
         return s + [...presentSet].filter(id => _sortedSet.has(devTeamMap[id])).length;
       }, 0);
       const overallAvg = sessions.length ? Math.round(overallTotal / sessions.length) : 0;
-      const overallAvgColor = overallAvg >= 15 ? '#16a34a' : overallAvg >= 8 ? '#b45309' : '#dc2626';
+      const overallAvgColor = '#ffffff';
 
       tableEl.innerHTML = `
         <div class="table-scroll">
@@ -380,10 +379,10 @@ async function renderHomeLeaderboard() {
               <th style="position:sticky;top:0;background:#0d2d5a;font-style:italic">Avg</th>
             </tr></thead>
             <tbody>${tableRows}</tbody>
-            <tfoot><tr>
-              <td class="lb-sno-cell"></td>
-              <td class="lb-team-cell lb-total-td">Total</td>${totalCells}
-              <td class="lb-td lb-total-td lb-avg-td" style="color:${overallAvgColor};font-weight:800">${overallAvg}</td>
+            <tfoot><tr style="background:#1a3a5c;border-top:2px solid #0d2d5a">
+              <td class="lb-sno-cell" style="background:#1a3a5c"></td>
+              <td class="lb-team-cell" style="background:#1a3a5c;color:#fff;font-weight:800">Total</td>${totalCells}
+              <td class="lb-td lb-avg-td" style="background:#0f2a47;color:${overallAvgColor};font-weight:800">${overallAvg}</td>
             </tr></tfoot>
           </table>
         </div>`;
