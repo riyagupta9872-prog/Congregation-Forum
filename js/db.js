@@ -858,8 +858,10 @@ const DB = {
       }
       return !!(d.callingBy && d.callingBy.trim());
     });
-    // Calls tab is always personal — filter to only this user's assigned devotees
-    filtered = filtered.filter(d => d.callingBy === AppState.userName);
+    // Calls tab — personal for coordinators; superAdmin sees all (no personal assignments).
+    if (AppState.userRole !== 'superAdmin') {
+      filtered = filtered.filter(d => d.callingBy === AppState.userName);
+    }
     return filtered.map(d => ({
       ...toSnake(d),
       coming_status:     csMap[d.id]?.comingStatus    || null,

@@ -249,6 +249,7 @@ async function doLogin(e) {
   try {
     await auth.signInWithEmailAndPassword(email, password);
   } catch (ex) {
+    if ((ex.message || '').includes('FIRESTORE INTERNAL ASSERTION FAILED')) { location.reload(); return; }
     const badCred = ['auth/wrong-password','auth/user-not-found','auth/invalid-credential','auth/invalid-email'];
     err.textContent = badCred.includes(ex.code) ? 'Invalid email or password' : ex.message;
     err.classList.add('show');
@@ -317,6 +318,7 @@ async function doSignup(e) {
     showPendingApprovalScreen();
     _resetBtn();
   } catch (ex) {
+    if ((ex.message || '').includes('FIRESTORE INTERNAL ASSERTION FAILED')) { location.reload(); return; }
     err.textContent = ex.code === 'auth/email-already-in-use' ? 'Email already registered' : ex.message;
     err.classList.add('show');
     _resetBtn();
@@ -842,7 +844,14 @@ async function resolveCallingDate(sessionDate) {
   if (!sessionDate) return null;
   try {
     const cfg = await DB.getCallingWeekConfig();
-    if (cfg?.sessionDate === sessionDate && cfg?.callingDate) return cfg.callingDate;
+    if (cfg?.sessionDate === sessionDate && cfg?.callingDate) {
+      // Sanity: callingDate must be within the same week (0–6 days before session Sunday).
+      // If the stored callingDate is from a different week (stale config), fall through.
+      const sess = new Date(sessionDate + 'T00:00:00');
+      const call = new Date(cfg.callingDate + 'T00:00:00');
+      const diffDays = (sess - call) / 86400000;
+      if (diffDays >= 0 && diffDays <= 6) return cfg.callingDate;
+    }
   } catch (_) {}
   const d = new Date(sessionDate + 'T00:00:00');
   d.setDate(d.getDate() - 1);
@@ -2741,7 +2750,7 @@ function _isSessionAnchoredReportsView(tab, view) {
 // auto-restore logic when leaving Reports.
 function _isLiveSessionView(tab, view) {
   return (tab === 'attendance' && view === 'live')
-      || (tab === 'calling' && view === 'calls');
+      || (tab === 'calling' && (view === 'calls' || view === 'team-calling'));
 }
 
 // Maps a TAB_VIEWS key to the underlying sub-tab + sub-panel for that tab.

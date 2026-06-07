@@ -434,6 +434,7 @@ async function doSubmitCallingWeek(week) {
   try {
     await DB.submitCallingWeek(week, AppState.userId, AppState.userName, AppState.userTeam);
     _bustCSCache();
+    _tcBustCache();
     showToast('Calling submitted! Hare Krishna 🙏', 'success');
   } catch (e) {
     console.error('Submit calling failed:', e);

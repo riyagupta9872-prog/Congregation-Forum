@@ -2123,8 +2123,8 @@
         </div>
         <div class="form-group">
           <label><i class="fas fa-chalkboard-teacher"></i> Attendance Date</label>
-          <input type="date" id="sc-attendance-date">
-          <span class="field-hint">Sunday class date</span>
+          <input type="date" id="sc-attendance-date" onchange="(function(v){if(!v)return;const d=new Date(v+'T00:00:00');d.setDate(d.getDate()-1);document.getElementById('sc-calling-date').value=d.toISOString().slice(0,10);})(this.value)">
+          <span class="field-hint">Sunday class date (calling date auto-fills to Saturday)</span>
         </div>
       </div>
       <div class="form-actions">
