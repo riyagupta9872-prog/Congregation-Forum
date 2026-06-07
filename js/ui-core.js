@@ -286,14 +286,6 @@ async function doSignup(e) {
     _resetBtn(); return;
   }
   try {
-    // Check if this email already has a pending signup request to avoid duplicates
-    const dupCheck = await fdb.collection('signupRequests')
-      .where('email', '==', email).where('status', '==', 'pending').limit(1).get();
-    if (!dupCheck.empty) {
-      showPendingApprovalScreen();
-      _resetBtn(); return;
-    }
-
     const cred = await auth.createUserWithEmailAndPassword(email, password);
     await cred.user.updateProfile({ displayName: name });
     // First user EVER bootstraps as approved superAdmin. Everyone else lands
@@ -2741,7 +2733,7 @@ function _maybeRestoreLiveSession() {
 // pickers, so auto-snapping the global Session for them does nothing useful
 // (and would mislead users with a "Showing last completed session" toast).
 function _isSessionAnchoredReportsView(tab, view) {
-  const callingLiveViews = ['calls', 'said-coming', 'not-coming-present'];
+  const callingLiveViews = ['calls', 'team-calling', 'history', 'said-coming', 'not-coming-present'];
   return (tab === 'attendance' && view !== 'live')
       || (tab === 'calling' && !callingLiveViews.includes(view));
 }

@@ -37,8 +37,10 @@ service cloud.firestore {
     // users/{userId}
     // =========================================================================
     match /users/{userId} {
-      // Own profile always readable; admins can read all (user management panel)
-      allow read: if isAuthed() && (request.auth.uid == userId || canManageAll());
+      // Any authed user can read — needed for the first-user bootstrap collection
+      // query (limit(2)) and for the user management panel. users docs only hold
+      // role/team/delegation flags; no personal secrets. Write rules remain admin-only.
+      allow read: if isAuthed();
 
       // Create:
       //   • Admins create docs via approveSignupRequest()

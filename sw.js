@@ -1,7 +1,7 @@
 ﻿/* â•â• SERVICE WORKER â€“ Sakhi Sang â•â• */
 // Bump this version string every time you deploy new code.
 // This tells the browser to throw away old cached files and install fresh ones.
-const CACHE = 'congregation-forum-v26';
+const CACHE = 'congregation-forum-v27';
 const SHELL = [
   './index.html',
   './js/config.js',
