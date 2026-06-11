@@ -23,21 +23,33 @@ fdb.enablePersistence({ synchronizeTabs: true }).catch(err => {
 
 // Recover from Firestore SDK internal assertion errors (known bug with multi-tab persistence).
 // When this happens the SDK is in an unrecoverable state — a reload is the only fix.
+// The error can surface three ways: unhandledrejection, window error, or console.error
+// (when Firebase catches it internally and logs it without re-throwing). All three covered.
+let _reloadScheduled = false;
 function _isFirestoreAssertionError(msg) {
   return typeof msg === 'string' && msg.includes('INTERNAL ASSERTION FAILED');
 }
+function _scheduleReload() {
+  if (_reloadScheduled) return;
+  _reloadScheduled = true;
+  console.warn('[Congregation Forum] Firestore internal error — reloading to recover');
+  setTimeout(() => location.reload(), 800);
+}
 window.addEventListener('unhandledrejection', e => {
-  if (_isFirestoreAssertionError(e.reason?.message)) {
-    console.warn('[Congregation Forum] Firestore internal error — reloading to recover');
-    setTimeout(() => location.reload(), 600);
-  }
+  if (_isFirestoreAssertionError(e.reason?.message)) _scheduleReload();
 });
 window.addEventListener('error', e => {
-  if (_isFirestoreAssertionError(e.message)) {
-    console.warn('[Congregation Forum] Firestore internal error — reloading to recover');
-    setTimeout(() => location.reload(), 600);
-  }
+  if (_isFirestoreAssertionError(e.message)) _scheduleReload();
 });
+// Firebase sometimes catches the error internally and logs it via console.error
+// without re-throwing — intercept that path too.
+const _origConsoleError = console.error.bind(console);
+console.error = function (...args) {
+  _origConsoleError(...args);
+  const first = args[0];
+  const msg = typeof first === 'string' ? first : (first?.message || '');
+  if (_isFirestoreAssertionError(msg)) _scheduleReload();
+};
 
 // ── APP STATE ─────────────────────────────────────────
 const AppState = {
@@ -116,14 +128,6 @@ function dispatchFilters(patch) {
   if (!f) return;
   const before = { ...f };
 
-  if (patch.dept !== undefined) {
-    f.dept = patch.dept || '';
-    // When dept changes, clear team if it no longer belongs to the new dept
-    if (f.dept && f.team && !getTeamsForDept(f.dept).includes(f.team)) {
-      f.team = '';
-    }
-  }
-
   if (patch.sessionId !== undefined) {
     f.sessionId = patch.sessionId || null;
     if (f.sessionId && !f.periodAnchor) f.periodAnchor = f.sessionId;
@@ -136,6 +140,13 @@ function dispatchFilters(patch) {
       AppState.sessionsCache[patch._sessionDocId] = {
         id: patch._sessionDocId, session_date: f.sessionId, topic: '', is_cancelled: false
       };
+    }
+  }
+  if (patch.dept !== undefined) {
+    f.dept = patch.dept || '';
+    // If the new dept doesn't include the currently-selected team, clear the team.
+    if (f.dept && f.team && !getTeamsForDept(f.dept).includes(f.team)) {
+      f.team = '';
     }
   }
   if (patch.team !== undefined) {
@@ -188,10 +199,10 @@ function dispatchFilters(patch) {
 }
 
 // Convenience read helpers — used by tab code.
-function getFilterDept()      { return AppState.filters?.dept      || ''; }
 function getFilterTeam()      { return AppState.filters?.team      || ''; }
 function getFilterCallingBy() { return AppState.filters?.callingBy || ''; }
 function getFilterSessionId() { return AppState.filters?.sessionId || null; }
+function getFilterDept()      { return AppState.filters?.dept      || ''; }
 
 // ── ROLE / PERMISSION HELPERS ──────────────────────────
 // These are the canonical checks. Use them everywhere instead of raw role
@@ -203,65 +214,71 @@ function isCoordinator()        { return AppState.userRole === 'teamAdmin'; }
 function isFacilitator()        { return AppState.userRole === 'serviceDevotee'; }
 function isAdminOrCoord()       { return isSuperAdmin() || isDeptAdmin() || isCoordinator(); }
 // canCrossTeamCalling = can submit calling for ANY team (not just their own).
-// True for super admin, anyone with canAllTeamCalling, or canManageAllTeams.
+// True for super admin, deptAdmin (within their dept), anyone with
+// canAllTeamCalling, or canManageAllTeams.
 function canCrossTeamCalling()  { return isSuperAdmin() || isDeptAdmin() || !!AppState.canAllTeamCalling || !!AppState.canManageAllTeams; }
 function canCrossTeamReports()  { return isSuperAdmin() || isDeptAdmin() || !!AppState.canAllTeamReports || !!AppState.canManageAllTeams; }
 function canCrossTeamManage()   { return isSuperAdmin() || !!AppState.canManageAllTeams; }
 // "Can the user freely change the Team filter chip?" — yes if they can see
-// reports for all teams OR manage all teams OR are super admin OR deptAdmin.
+// reports for all teams OR manage all teams OR are super admin / deptAdmin.
 function canChangeTeamFilter()  { return canCrossTeamReports() || canCrossTeamManage() || canCrossTeamCalling(); }
 
-// ── DEPARTMENTS & TEAMS (single source of truth) ──────
-// Departments organise teams. Gender on a devotee auto-assigns department:
-//   Male  → ICF_Prji   |   Female → ICF_Mtg
-// Users (coordinators/admins) choose their dept independently of gender.
+// ── DEPARTMENTS / TEAMS (single source of truth) ───────
 const DEPARTMENTS = {
   ICF_Prji: ['Vasudeva','Sankarshan','Pradyumna','Anirudha','Panchaal','Other ICF_Prji'],
   ICF_Mtg:  ['Rohini','Rukmini','Kalindi','Satyabhama','Jamvanti','Lakshmana','Kaushal','Bhadra','Panchaali','Other ICF_Mtg'],
 };
 const TEAMS = Object.values(DEPARTMENTS).flat();
 
+// team name -> 'ICF_Prji' | 'ICF_Mtg' | ''
 function getDeptForTeam(team) {
-  for (const [dept, teams] of Object.entries(DEPARTMENTS)) {
-    if (teams.includes(team)) return dept;
+  if (!team) return '';
+  for (const dept of Object.keys(DEPARTMENTS)) {
+    if (DEPARTMENTS[dept].includes(team)) return dept;
   }
   return '';
-}
-function getTeamsForDept(dept) {
-  return DEPARTMENTS[dept] || [];
-}
-function getDeptForGender(gender) {
-  if (gender === 'Female') return 'ICF_Mtg';
-  if (gender === 'Male')   return 'ICF_Prji';
-  return '';
-}
-// Returns true if a devotee (camelCase Firestore doc) belongs to a department.
-// Checks three paths so any one is sufficient:
-//   1. teamName is in the dept's team list (team → dept)
-//   2. stored department field matches (explicit assignment)
-//   3. gender maps to that dept (Male → ICF_Prji, Female → ICF_Mtg)
-function matchesDept(d, dept) {
-  if (!dept) return true;
-  if (getTeamsForDept(dept).includes(d.teamName)) return true;
-  if (d.department === dept) return true;
-  if (getDeptForGender(d.gender) === dept) return true;
-  return false;
 }
 
-// ── DEPT REPORT HELPERS ────────────────────────────────
-// Returns `teams` reordered to match the canonical DEPARTMENTS sequence.
-// Teams not found in any dept are appended at the end.
-function sortTeamsByDept(teams) {
-  const ordered = [];
-  for (const deptTeams of Object.values(DEPARTMENTS)) {
-    deptTeams.forEach(t => { if (teams.includes(t)) ordered.push(t); });
-  }
-  teams.forEach(t => { if (!ordered.includes(t)) ordered.push(t); });
-  return ordered;
+// dept -> string[] of team names ('' / unknown -> all teams)
+function getTeamsForDept(dept) {
+  return DEPARTMENTS[dept] || TEAMS;
 }
-// Returns a full-width <tr> that labels a department section in report tables.
+
+// gender -> default department ('Male' -> ICF_Prji, 'Female' -> ICF_Mtg)
+function getDeptForGender(gender) {
+  if (gender === 'Male') return 'ICF_Prji';
+  if (gender === 'Female') return 'ICF_Mtg';
+  return '';
+}
+
+// Does devotee `d` (with teamName/department/gender) belong to `dept`?
+function matchesDept(d, dept) {
+  if (!dept) return true;
+  if (!d) return false;
+  const team = d.teamName || d.team_name || '';
+  const team_dept = d.department || getDeptForTeam(team) || getDeptForGender(d.gender);
+  return team_dept === dept;
+}
+
+// Sort a list of team names so ICF_Prji teams come before ICF_Mtg teams,
+// each group in DEPARTMENTS order. Unknown teams sort last.
+function sortTeamsByDept(teams) {
+  const order = TEAMS;
+  return [...teams].sort((a, b) => {
+    const ia = order.indexOf(a), ib = order.indexOf(b);
+    if (ia === -1 && ib === -1) return a.localeCompare(b);
+    if (ia === -1) return 1;
+    if (ib === -1) return -1;
+    return ia - ib;
+  });
+}
+
+// <tr> section header used to group report/leaderboard tables by department.
 function deptGroupHeaderHTML(colspan, deptName) {
-  return `<tr><td colspan="${colspan}" style="background:#0d2d5a;color:#fff;font-weight:700;font-size:.78rem;text-align:center;padding:.35rem .75rem;letter-spacing:.06em;text-transform:uppercase">${deptName}</td></tr>`;
+  const label = deptName === 'ICF_Prji' ? 'ICF Prabhuji'
+              : deptName === 'ICF_Mtg'  ? 'ICF Mataji'
+              : deptName;
+  return `<tr class="dept-group-header"><td colspan="${colspan}">${label}</td></tr>`;
 }
 
 // ── ATTENDANCE TIME COLOUR ─────────────────────────────
@@ -370,16 +387,36 @@ function nameTags(d) {
   return html;
 }
 
-// Calling submission window state. OPEN is MANUAL (Session Config toggle), but
-// it AUTO-CLOSES at 11:59 PM on the calling date (Saturday night). An admin can
-// also close it early by turning the toggle off. Returns true only while the
-// window is effectively open.
+// Calling submission window state — TWO layers:
+//
+//  1. AUTOMATIC (driver) — the configured `callingDate` itself opens the
+//     window for a 24-hour span starting at midnight of that date. No admin
+//     action needed; this is the normal weekly behavior.
+//  2. MANUAL OVERRIDE — the Session Config "Calling Window Open" toggle lets
+//     the admin force the window open OR closed regardless of the calling
+//     date (e.g. early access, late/catch-up submissions, or an early
+//     shutdown). Whatever the admin sets it to wins for exactly 24 hours
+//     from the moment they touch it (`callingWindowOverrideAt`), then the
+//     override expires and control reverts to the automatic calling-date
+//     driver above.
 function isCallingWindowOpen(cfg) {
-  if (!cfg || cfg.callingWindowOpen !== true) return false;
+  if (!cfg) return false;
+
+  const overrideAt = cfg.callingWindowOverrideAt;
+  if (overrideAt) {
+    const ms = overrideAt.toMillis ? overrideAt.toMillis() : new Date(overrideAt).getTime();
+    if (ms && !isNaN(ms) && (Date.now() - ms) < 24 * 60 * 60 * 1000) {
+      return cfg.callingWindowOverride === true; // active override — honor admin's explicit choice
+    }
+  }
+
+  // No active override — let the calling date drive it: open for 24h
+  // starting at the beginning of that date.
   const cd = cfg.callingDate;
-  if (!cd) return true;                       // manually open, no date to gate against
-  const deadline = new Date(cd + 'T23:59:59'); // Saturday 11:59 PM local
-  return new Date() <= deadline;
+  if (!cd) return false;
+  const start = new Date(cd + 'T00:00:00').getTime();
+  const now   = Date.now();
+  return now >= start && now < start + 24 * 60 * 60 * 1000;
 }
 // contactIcons(mobile) → direct call/whatsapp links (single number).
 // contactIcons(mobile, { altMobile, devoteeId, name }) → if altMobile is also
@@ -533,7 +570,13 @@ const DevoteeCache = {
     if (this._inflight) return this._inflight;
     this._inflight = (async () => {
       try {
-        const snap = await fdb.collection('devotees').where('isActive', '==', true).get();
+        let q = fdb.collection('devotees').where('isActive', '==', true);
+        // Team-scoped fetch: users who can't see cross-team data only get their own team.
+        // canCrossTeamManage/Reports/Calling all fold in isSuperAdmin so one check covers all.
+        if (!canCrossTeamManage() && !canCrossTeamReports() && !canCrossTeamCalling() && AppState.userTeam) {
+          q = q.where('teamName', '==', AppState.userTeam);
+        }
+        const snap = await q.get();
         this.raw = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         this.raw.sort((a, b) => a.name.localeCompare(b.name));
         this.stamp = Date.now();

@@ -1,0 +1,18 @@
+172:  const filterDept = (typeof getFilterDept === 'function') ? getFilterDept() : '';
+174:    : filterDept && typeof getTeamsForDept === 'function' ? getTeamsForDept(filterDept)
+281:            if (!filterTeam && !filterDept && typeof getDeptForTeam === 'function' && typeof DEPARTMENTS !== 'undefined') {
+283:              Object.keys(DEPARTMENTS).forEach(dept => {
+284:                const dr = rows.filter(r => getDeptForTeam(r.team) === dept);
+286:                _dp.push(`<tr><td colspan="6" style="background:#0d2d5a;color:#fff;font-weight:700;font-size:.78rem;text-align:center;padding:.35rem .75rem;letter-spacing:.06em;text-transform:uppercase">${dept}</td></tr>`);
+729:  const dept = (typeof getFilterDept === 'function') ? getFilterDept() : '';
+732:    if (dept && typeof matchesDept === 'function') {
+733:      return list.filter(d => matchesDept(
+735:        dept
+1653:    let _mgmtLastDept = null;
+1657:      const _thisDept = typeof getDeptForTeam === 'function' ? getDeptForTeam(team) : null;
+1658:      if (_thisDept && _thisDept !== _mgmtLastDept) {
+1659:        _mgmtLastDept = _thisDept;
+1660:        rows.push([_thisDept, ...Array(headers.length - 1).fill('')].map((v, i) => ({ v, s: i === 0 ? GRD : XS.hdr('0D2D5A', 'FFFFFF') })));
+3021:    const deptFilter = (typeof getFilterDept === 'function') ? getFilterDept() : '';
+3024:      if (deptFilter && typeof matchesDept === 'function')
+3025:        return matchesDept({ teamName: r.team_name, department: r.department, gender: r.gender }, deptFilter);
