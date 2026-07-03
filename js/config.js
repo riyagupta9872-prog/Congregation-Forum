@@ -578,7 +578,7 @@ const DevoteeCache = {
         }
         const snap = await q.get();
         this.raw = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        this.raw.sort((a, b) => a.name.localeCompare(b.name));
+        this.raw.sort((a, b) => (a.name||'').localeCompare(b.name||''));
         this.stamp = Date.now();
         return this.raw;
       } finally {

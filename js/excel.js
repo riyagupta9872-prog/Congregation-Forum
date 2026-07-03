@@ -200,7 +200,7 @@ async function exportCallingList() {
 
     TEAMS.forEach(team => {
       const members = activeDevotees.filter(d => d.teamName === team);
-      members.sort((a,b) => (a.callingBy||'').localeCompare(b.callingBy||'') || a.name.localeCompare(b.name));
+      members.sort((a,b) => (a.callingBy||'').localeCompare(b.callingBy||'') || (a.name||'').localeCompare(b.name||''));
       if (!members.length) return;
 
       const fixedHdrs = ['#','Name','Mobile','Ref','CR','Active','Calling By',`FY Total\n(${fyLabel})`];
@@ -402,7 +402,7 @@ async function exportCallingListByCoord() {
     }
 
     Object.keys(byCoord).sort().forEach(coordName => {
-      const members = [...byCoord[coordName]].sort((a, b) => a.name.localeCompare(b.name));
+      const members = [...byCoord[coordName]].sort((a, b) => (a.name||'').localeCompare(b.name||''));
 
       const hdrRow = [
         ...fixedLabels.map((h, ci) => {
@@ -519,7 +519,7 @@ async function exportSheetExcel() {
     const devotees = await DevoteeCache.all();
     let rows = [...devotees];
     if (teamFilter) rows = rows.filter(d => d.teamName === teamFilter);
-    rows.sort((a, b) => (a.teamName || '').localeCompare(b.teamName || '') || a.name.localeCompare(b.name));
+    rows.sort((a, b) => (a.teamName || '').localeCompare(b.teamName || '') || (a.name||'').localeCompare(b.name||''));
 
     const headerRow = ['Sno', 'Name', 'Mobile', 'Reference', 'CR', 'Active', 'Team', 'Calling By', 'Total Attendance'];
     const dataRows = rows.map((d, i) => [
@@ -570,7 +570,7 @@ async function exportYearlySheetExcel() {
     const { sessions, devotees, attMap, csMap } = await DB.getSheetData(start, end);
     let rows = [...devotees];
     if (teamFilter) rows = rows.filter(d => d.teamName === teamFilter);
-    rows.sort((a, b) => (a.teamName || '').localeCompare(b.teamName || '') || a.name.localeCompare(b.name));
+    rows.sort((a, b) => (a.teamName || '').localeCompare(b.teamName || '') || (a.name||'').localeCompare(b.name||''));
 
     const fixedHdrs = ['Sno', 'Name', 'Mobile', 'Reference', 'CR', 'Active', 'Team', 'Calling By'];
     const headerRow1 = [...fixedHdrs];
@@ -816,7 +816,7 @@ async function _buildAndDownloadDevoteeWorkbook({ devotees, includeTeamCol, file
       levels.forEach(lvl => {
         const members = teamDevotees
           .filter(d => { const cr = d.chantingRounds || 0; return cr >= lvl.min && cr <= lvl.max; })
-          .sort((a, b) => a.name.localeCompare(b.name));
+          .sort((a, b) => (a.name||'').localeCompare(b.name||''));
         if (!members.length) return;
 
         // Level banner
@@ -1337,6 +1337,16 @@ async function handleImportFile(e) {
       // "All Teams", once in the flat sheet).
       if (usedFlat) continue;
       const ws = wb.Sheets[sheetName];
+      // Some Excel files save a stale !ref that doesn't cover all populated rows
+      // (e.g. file was filtered/resaved). Scan actual cell addresses and extend
+      // the range so sheet_to_json sees every row.
+      if (ws['!ref']) {
+        const range = XLSX.utils.decode_range(ws['!ref']);
+        Object.keys(ws).filter(k => !k.startsWith('!')).forEach(k => {
+          try { const { r } = XLSX.utils.decode_cell(k); if (r > range.e.r) range.e.r = r; } catch (_) {}
+        });
+        ws['!ref'] = XLSX.utils.encode_range(range);
+      }
       let rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
       if (!rows.length) continue;
 
@@ -1366,7 +1376,12 @@ async function handleImportFile(e) {
       });
 
       allRows = allRows.concat(rows);
-      if (/re.?import|flat/i.test(sheetName) && allRows.length) usedFlat = true;
+      // Only treat this as the canonical flat sheet if the name contains BOTH
+      // "re-import" (or "reimport") AND "flat" — that's the specific sheet name
+      // the app's own export writes ("Re-Import (Flat)"). Sheets that merely
+      // contain "flat" (e.g. "Class List (Flat)", "Flat Register") would
+      // otherwise prematurely stop multi-sheet imports.
+      if (/re.?import/i.test(sheetName) && /flat/i.test(sheetName) && allRows.length) usedFlat = true;
     }
 
     if (!allRows.length) {
@@ -1378,6 +1393,7 @@ async function handleImportFile(e) {
       <p>Click to browse or drag & drop Excel file</p>
       <small style="color:var(--text-muted)">Supports any column names — auto-detected</small>
       <input type="file" id="import-file" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleImportFile(event)">`;
+    console.log(`[Import] Parsed ${allRows.length} rows from ${sheetOrder.filter(s=>!s.toLowerCase().includes('instruction')).length} sheet(s): ${wb.SheetNames.join(', ')}`);
     showColumnMappingUI(allRows);
   } catch (err) {
     result.className = 'import-result error';
@@ -1455,6 +1471,7 @@ async function confirmMappingImport() {
 
   let users = [];
   try { users = await DB.getUsersForTeam(''); } catch (_) {}
+  users.sort((a, b) => (a.name||'').localeCompare(b.name||''));
   const userByLower = {};
   users.forEach(u => { if (u.name) userByLower[u.name.trim().toLowerCase()] = u.name; });
 

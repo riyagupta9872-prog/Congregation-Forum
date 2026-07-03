@@ -1727,7 +1727,7 @@ async function loadLateReports() {
     rows.sort((a, b) => {
       if (a.lateCount !== b.lateCount)          return a.lateCount - b.lateCount;
       if (a.recentLateIdx !== b.recentLateIdx)  return a.recentLateIdx - b.recentLateIdx;
-      return a.name.localeCompare(b.name);
+      return (a.name||'').localeCompare(b.name||'');
     });
 
     // Stash for the "Send Reminders" modal — needs the current week's

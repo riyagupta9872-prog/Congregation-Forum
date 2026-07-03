@@ -55,7 +55,7 @@ async function loadAttendanceSheet() {
 function buildSimpleRoster(devotees, teamFilter) {
   let rows = [...devotees];
   if (teamFilter) rows = rows.filter(d => d.teamName === teamFilter);
-  rows.sort((a, b) => (a.teamName || '').localeCompare(b.teamName || '') || a.name.localeCompare(b.name));
+  rows.sort((a, b) => (a.teamName || '').localeCompare(b.teamName || '') || (a.name||'').localeCompare(b.name||''));
   if (!rows.length) return '<div class="empty-state"><i class="fas fa-users"></i><p>No devotees found</p></div>';
 
   let currentTeam = null;
@@ -431,7 +431,7 @@ async function openAttendanceStatList(type) {
             markedAt: r.markedAt || '', saidYes, surprisePresent: surprisePresent && !r.isNewDevotee,
           };
         })
-        .sort((a, b) => (a.teamName||'').localeCompare(b.teamName||'') || a.name.localeCompare(b.name));
+        .sort((a, b) => (a.teamName||'').localeCompare(b.teamName||'') || (a.name||'').localeCompare(b.name||''));
     } else {
       // confirmed — reuse the already-fetched csSnap (no extra round trip needed)
       list = csSnap.docs
@@ -439,7 +439,7 @@ async function openAttendanceStatList(type) {
         .map(d => {
           const dev = devMap[d.data().devoteeId] || {};
           return { id: d.data().devoteeId, name: dev.name || '—', mobile: dev.mobile || '', teamName: dev.teamName || '' };
-        }).sort((a,b) => (a.teamName||'').localeCompare(b.teamName||'') || a.name.localeCompare(b.name));
+        }).sort((a,b) => (a.teamName||'').localeCompare(b.teamName||'') || (a.name||'').localeCompare(b.name||''));
     }
 
     const HDR  = '#dbeafe';

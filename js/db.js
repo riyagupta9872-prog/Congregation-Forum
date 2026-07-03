@@ -1439,7 +1439,7 @@ const DB = {
     const list = yesIds.filter(id => !attSet.has(id)).map(id => {
       const d = devMap[id] || {};
       return { id, name:d.name||'—', teamName:d.teamName||'', callingBy:d.callingBy||'', mobile:d.mobile||'' };
-    }).sort((a,b) => (a.teamName||'').localeCompare(b.teamName||'') || a.name.localeCompare(b.name));
+    }).sort((a,b) => (a.teamName||'').localeCompare(b.teamName||'') || (a.name||'').localeCompare(b.name||''));
     // De-dupe by mobile (or name+team if no mobile) — handles duplicate devotee
     // profiles (same person entered more than once with the same number),
     // which the devoteeId-based de-dupe above can't catch since each duplicate
@@ -1702,7 +1702,7 @@ const DB = {
     return snap.docs.map(d => {
       const dt = d.data();
       return { id: d.id, devotee_id: dt.devoteeId, name: dt.devoteeName, mobile: dt.mobile, team_name: dt.teamName };
-    }).sort((a, b) => a.name.localeCompare(b.name));
+    }).sort((a, b) => (a.name||'').localeCompare(b.name||''));
   },
 
   async addEventDevotee(eventId, devotee) {
@@ -1827,7 +1827,7 @@ const DB = {
       saidComing: r.saidComing.size,
       actuallyCame: r.came.size,
       saidComingNotCame: [...r.saidComing].filter(id => !r.came.has(id)).length,
-    })).sort((a, b) => a.team.localeCompare(b.team));
+    })).sort((a, b) => (a.team||'').localeCompare(b.team||''));
   },
 
   // ── BOOK DISTRIBUTION ────────────────────────────────
