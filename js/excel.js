@@ -2036,6 +2036,7 @@ const _MONTHLY_TEAM_PALETTES = {
   'Bhadra':         ['FFCDD2','EF9A9A','E57373','EF5350','E53935','B71C1C'],
   'Panchaali':      ['FCE4EC','F8BBD0','F48FB1','F06292','E91E63','880E4F'],
   'Other ICF_Mtg':  ['F5F5F5','EEEEEE','E0E0E0','BDBDBD','9E9E9E','757575'],
+  'Other':          ['F5F5F5','EEEEEE','E0E0E0','BDBDBD','9E9E9E','757575'],
 };
 
 function _monthBounds(yearMonth) {
