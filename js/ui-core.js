@@ -2197,23 +2197,32 @@ function setupPicker(containerId, hiddenId) {
   const dropdown = container.querySelector('.picker-dropdown');
   const hidden   = document.getElementById(hiddenId);
 
-  input.addEventListener('input', debounce(async () => {
-    const q = input.value.trim();
+  async function _runPickerSearch(q) {
     hidden.value = '';
     input.classList.remove('has-value');
-    if (q.length < 2) { dropdown.classList.add('hidden'); dropdown.innerHTML = ''; return; }
+    if (!q) { dropdown.classList.add('hidden'); dropdown.innerHTML = ''; return; }
     const results = await DB.getDevotees({ search: q });
     if (!results.length) {
       dropdown.innerHTML = '<div class="picker-no-result">No devotee found</div>';
       dropdown.classList.remove('hidden'); return;
     }
     dropdown.innerHTML = results.slice(0, 8).map(d => `
-      <div class="picker-option" onclick="selectPicker('${containerId}','${hiddenId}','${d.name.replace(/'/g,"\\'")}','${d.id}')">
-        <span>${d.name}</span>
+      <div class="picker-option" onclick="selectPicker('${containerId}','${hiddenId}','${(d.name||'').replace(/'/g,"\\'")}','${d.id}')">
+        <span>${d.name || ''}</span>
         <span class="picker-team">${[d.team_name, d.mobile].filter(Boolean).join(' · ')}</span>
       </div>`).join('');
     dropdown.classList.remove('hidden');
-  }, 280));
+  }
+
+  input.addEventListener('input', debounce(() => _runPickerSearch(input.value.trim()), 280));
+
+  // Show results on focus so the user doesn't have to guess they need to type
+  input.addEventListener('focus', () => {
+    if (!input.classList.contains('has-value') && !input.value.trim()) {
+      dropdown.innerHTML = '<div class="picker-no-result" style="color:var(--text-muted);font-style:italic">Type a name to search…</div>';
+      dropdown.classList.remove('hidden');
+    }
+  });
 
   document.addEventListener('click', (e) => {
     if (!container.contains(e.target)) dropdown.classList.add('hidden');

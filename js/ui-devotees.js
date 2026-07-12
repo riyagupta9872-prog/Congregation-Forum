@@ -611,7 +611,7 @@ function _onDeptChange(val, keepTeam) {
   optgroups.forEach(og => {
     const show = !val || og.label === val;
     og.style.display = show ? '' : 'none';
-    Array.from(og.options).forEach(o => o.disabled = !show);
+    og.querySelectorAll('option').forEach(o => o.disabled = !show);
   });
   // If current team belongs to a different dept, reset team
   if (!keepTeam && val && typeof getDeptForTeam === 'function') {
@@ -691,7 +691,7 @@ async function saveDevotee(e) {
     setTimeout(() => document.getElementById('f-dept')?.focus(), 100);
     return;
   }
-  if (!payload.reference_by) {
+  if (!payload.reference_by && !id) {
     switchProfileTab('team', null);
     showToast('Reference By is required', 'error');
     setTimeout(() => document.querySelector('#picker-reference .picker-input')?.focus(), 100);

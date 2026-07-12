@@ -116,7 +116,7 @@ const DB = {
     let list = await DevoteeCache.all();
     if (filters.search) {
       const s = filters.search.toLowerCase();
-      list = list.filter(d => d.name.toLowerCase().includes(s) || (d.mobile || '').includes(s));
+      list = list.filter(d => (d.name || '').toLowerCase().includes(s) || (d.mobile || '').includes(s));
     }
     if (filters.team)       list = list.filter(d => d.teamName === filters.team);
     if (filters.dept)       list = list.filter(d => matchesDept(d, filters.dept));
@@ -501,7 +501,7 @@ const DB = {
     });
     if (search) {
       const s = search.toLowerCase();
-      list = list.filter(d => d.name.toLowerCase().includes(s) || (d.mobile || '').includes(s));
+      list = list.filter(d => (d.name || '').toLowerCase().includes(s) || (d.mobile || '').includes(s));
     }
     // Apply master filter bar team/dept so attendance candidates respect scope.
     const _attTeam = AppState.filters?.team || '';
